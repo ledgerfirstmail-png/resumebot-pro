@@ -1,1 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 96.81 96.81"><rect width="96.81" height="96.81" rx="18"/><g fill="#fff"><rect x="24.67" y="24.67" width="47.47" height="11.87"/><rect x="24.67" y="36.54" width="11.87" height="35.61"/><rect x="40.06" y="39.98" width="23.74" height="11.87"/><rect x="40.06" y="51.85" width="11.87" height="20.3"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 96.81 96.81">
+  <defs>
+    <linearGradient id="clayDoc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe4ef"/>
+      <stop offset="1" stop-color="#ffb7d5"/>
+    </linearGradient>
+    <linearGradient id="clayLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e6479b"/>
+      <stop offset="1" stop-color="#f06eae"/>
+    </linearGradient>
+  </defs>
+  <!-- puffy paper sheet -->
+  <rect x="14" y="8" width="68.81" height="80.81" rx="20" fill="url(#clayDoc)"/>
+  <rect x="14" y="8" width="68.81" height="80.81" rx="20" fill="none" stroke="#ffffff" stroke-opacity="0.75" stroke-width="2.5"/>
+  <!-- folded corner -->
+  <path d="M 60 8 L 82.81 30.8 L 70 30.8 A 10 10 0 0 1 60 20.8 Z" fill="#ff9ec8"/>
+  <!-- text lines -->
+  <rect x="26" y="40" width="44.81" height="8" rx="4" fill="url(#clayLine)"/>
+  <rect x="26" y="54" width="32" height="7" rx="3.5" fill="#e6479b" opacity="0.55"/>
+  <rect x="26" y="67" width="38" height="7" rx="3.5" fill="#e6479b" opacity="0.35"/>
+  <!-- check bubble -->
+  <circle cx="72" cy="74" r="14" fill="#7cd4a8"/>
+  <circle cx="72" cy="74" r="14" fill="none" stroke="#ffffff" stroke-opacity="0.8" stroke-width="2.5"/>
+  <path d="M 65.5 74 L 70.2 78.7 L 79 69.9" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

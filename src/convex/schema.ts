@@ -16,6 +16,30 @@ export const roleValidator = v.union(
 );
 export type Role = Infer<typeof roleValidator>;
 
+// Score breakdown categories used by the AI tailoring engine.
+export const scoreLabelValidator = v.union(
+  v.literal("Skills"),
+  v.literal("Experience"),
+  v.literal("Education"),
+  v.literal("Summary"),
+  v.literal("Formatting"),
+);
+export type ScoreLabel = Infer<typeof scoreLabelValidator>;
+
+const experienceValidator = v.object({
+  company: v.string(),
+  title: v.string(),
+  startDate: v.string(),
+  endDate: v.string(),
+  bullets: v.array(v.string()),
+});
+
+const educationValidator = v.object({
+  school: v.string(),
+  degree: v.string(),
+  gradYear: v.string(),
+});
+
 const schema = defineSchema(
   {
     // default auth tables using convex auth.
@@ -32,12 +56,50 @@ const schema = defineSchema(
       role: v.optional(roleValidator), // role of the user. do not remove
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
-    // add other tables here
+    // The user's master resume profile — contact info, skills, experience, education.
+    // One per user; upserted by the wizard before tailoring.
+    resumeProfiles: defineTable({
+      userId: v.id("users"),
+      fullName: v.string(),
+      title: v.string(),
+      email: v.string(),
+      phone: v.string(),
+      location: v.string(),
+      portfolioUrl: v.string(),
+      summary: v.string(),
+      skills: v.array(v.string()),
+      experience: v.array(experienceValidator),
+      education: v.array(educationValidator),
+      updatedAt: v.number(),
+    }).index("by_user", ["userId"]),
 
-    // tableName: defineTable({
-    //   ...
-    //   // table fields
-    // }).index("by_field", ["field"])
+    // A tailored resume generated for one job posting, with its match score
+    // and per-category breakdown so the workspace can show progress without
+    // re-running the AI.
+    tailoredResumes: defineTable({
+      userId: v.id("users"),
+      profileId: v.id("resumeProfiles"),
+      companyName: v.string(),
+      jobTitle: v.string(),
+      jobDescription: v.string(),
+      score: v.number(),
+      summary: v.string(),
+      skills: v.array(v.string()),
+      experience: v.array(experienceValidator),
+      education: v.array(educationValidator),
+      keywords: v.array(v.string()),
+      breakdown: v.array(
+        v.object({
+          label: scoreLabelValidator,
+          score: v.number(),
+          maxScore: v.number(),
+          note: v.string(),
+        }),
+      ),
+      createdAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_profile", ["profileId"]),
   },
   {
     schemaValidation: false,

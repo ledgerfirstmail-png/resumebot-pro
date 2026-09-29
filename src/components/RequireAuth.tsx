@@ -1,12 +1,4 @@
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { ClayButton } from "@/components/clay/ClayButton";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2, Lock } from "lucide-react";
 import type { ReactNode } from "react";
@@ -15,11 +7,10 @@ import { Navigate, useLocation, useNavigate } from "react-router";
 /**
  * Wraps a route that requires a signed-in user.
  *
- * Signed-out visitors used to be bounced straight to `/auth`, which left them
- * on a bare sign-in form with no idea which page they had asked for or why they
- * were moved. The block is now stated on the page they landed on, and sign-in
- * still returns them to it via `returnTo`. Pass `redirectImmediately` for a
- * route where the bounce really is the better experience.
+ * Signed-out visitors see a clay-styled explanation block with the reason
+ * they were stopped, and sign-in returns them to the page via `returnTo`.
+ * Pass `redirectImmediately` for a route where the bounce really is the
+ * better experience.
  */
 export function RequireAuth({
   children,
@@ -41,8 +32,8 @@ export function RequireAuth({
 
   if (isLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      <main className="clay-bg flex min-h-screen items-center justify-center">
+        <Loader2 className="size-7 animate-spin text-primary" />
       </main>
     );
   }
@@ -56,33 +47,29 @@ export function RequireAuth({
     }
 
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background p-6">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex justify-center">
-              <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-muted">
-                <Lock className="size-5 text-muted-foreground" />
-              </div>
-            </div>
-            <CardTitle className="text-xl">{title}</CardTitle>
-            <CardDescription>{description}</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center text-sm text-muted-foreground">
+      <main className="clay-bg flex min-h-screen items-center justify-center p-6">
+        <div className="clay-card w-full max-w-md p-7 text-center">
+          <div className="flex justify-center">
+            <span className="clay-orb size-14 bg-clay-sky">
+              <Lock className="size-6 text-sky-800" />
+            </span>
+          </div>
+          <h1 className="clay-title mt-4 text-xl">{title}</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {description}
+          </p>
+          <p className="mt-4 text-xs text-muted-foreground">
             You'll come straight back to this page once you're signed in.
-          </CardContent>
-          <CardFooter className="flex flex-col gap-2">
-            <Button className="w-full" onClick={() => navigate(signInHref)}>
+          </p>
+          <div className="mt-5 flex flex-col gap-2">
+            <ClayButton onClick={() => navigate(signInHref)}>
               Sign in
-            </Button>
-            <Button
-              variant="ghost"
-              className="w-full"
-              onClick={() => navigate("/")}
-            >
+            </ClayButton>
+            <ClayButton variant="ghost" onClick={() => navigate("/")}>
               Back to home
-            </Button>
-          </CardFooter>
-        </Card>
+            </ClayButton>
+          </div>
+        </div>
       </main>
     );
   }
