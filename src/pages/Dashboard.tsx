@@ -2,6 +2,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import type { ApplicationKit, TailorResult } from "@/convex/ai";
 import { AppHeader } from "@/components/clay/AppHeader";
+import { JobRadar } from "@/components/clay/JobRadar";
 import { ClayButton } from "@/components/clay/ClayButton";
 import { ClayCard } from "@/components/clay/ClayCard";
 import { ConfirmationModal } from "@/components/clay/ConfirmationModal";
@@ -43,6 +44,8 @@ export default function Dashboard() {
   const [toDelete, setToDelete] = useState<SavedResume | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+  // Two workspaces: the resume studio and the employer radar (job search).
+  const [tab, setTab] = useState<"studio" | "radar">("studio");
 
   const deleteResume = useMutation(api.resumes.deleteResume);
 
@@ -154,6 +157,20 @@ export default function Dashboard() {
     setViewingSaved(false);
     setShowWizard(true);
     setKit(null);
+    setTab("studio");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  /** The radar's tailor pass finished — show it in the studio. */
+  const handleRadarTailor = (
+    job: { jobTitle: string; companyName: string; jobDescription: string },
+    tailored: TailorResult,
+  ) => {
+    setResult({ ...job, result: tailored });
+    setViewingSaved(false);
+    setShowWizard(false);
+    setKit(null);
+    setTab("studio");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -257,21 +274,68 @@ export default function Dashboard() {
       <AppHeader />
       <main className="clay-bg min-h-[calc(100vh-4.5rem)] px-4 pb-16 pt-6 sm:px-6">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-          {/* Greeting */}
+          {/* Greeting + workspace tabs */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h1 className="clay-title text-3xl sm:text-4xl">
-                Resume studio
+                {tab === "radar" ? "Job radar" : "Resume studio"}
               </h1>
               <p className="mt-1.5 text-sm text-muted-foreground">
-                Tailor your resume to any job posting and score what businesses
-                are looking for.
+                {tab === "radar"
+                  ? "Live openings scored against your resume — tailor, auto-apply, and watch for new matches."
+                  : "Tailor your resume to any job posting and score what businesses are looking for."}
               </p>
             </div>
-            <ClayButton size="lg" onClick={startNewTailoring}>
-              <Wand2 /> New tailoring
-            </ClayButton>
+            <div className="flex flex-wrap items-center gap-3">
+              <div
+                className="clay-chip flex gap-1 p-1"
+                role="tablist"
+                aria-label="Workspace"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === "studio"}
+                  onClick={() => setTab("studio")}
+                  className={`rounded-full px-4 py-1.5 text-xs font-bold transition-colors ${
+                    tab === "studio"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Studio
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === "radar"}
+                  onClick={() => setTab("radar")}
+                  className={`rounded-full px-4 py-1.5 text-xs font-bold transition-colors ${
+                    tab === "radar"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Job radar
+                </button>
+              </div>
+              <ClayButton size="lg" onClick={startNewTailoring}>
+                <Wand2 /> New tailoring
+              </ClayButton>
+            </div>
           </div>
+
+          {tab === "radar" ? (
+            <SectionBoundary key="radar-section">
+              <JobRadar
+                profile={profile}
+                defaultEmail={profile?.email ?? ""}
+                onBuildProfile={startNewTailoring}
+                onTailored={handleRadarTailor}
+              />
+            </SectionBoundary>
+          ) : (
+          <>
 
           {/* Result (after generation) */}
           {result ? (
@@ -397,6 +461,8 @@ export default function Dashboard() {
                 )}
               </section>
             </div>
+          )}
+          </>
           )}
         </div>
       </main>

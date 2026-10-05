@@ -1,5 +1,6 @@
 "use node";
 
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { vly } from "../lib/vly-integrations";
 import { assertPublicHttpUrl, clampScore, extractJson, htmlToText } from "../lib/aiParse";
 import { v } from "convex/values";
@@ -7,6 +8,7 @@ import { internal } from "./_generated/api";
 import type { AiRunKind, ScoreLabel } from "./schema";
 import { MAX_AI_CALLS_PER_DAY } from "./aiUsage";
 import { action, type ActionCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 
 export interface ExperienceEntry {
   company: string;
@@ -266,19 +268,31 @@ async function completeToJson(
  * Called directly from the resume wizard; the result is saved separately via
  * resumes.saveResume so the caller can preview/confirm first.
  */
-export const tailorResume = action({
-  args: {
-    profileJson: v.string(),
-    jobTitle: v.string(),
-    companyName: v.string(),
-    jobDescription: v.string(),
-    sessionId: v.string(),
-    boostKeywords: v.optional(v.array(v.string())),
-  },
-  handler: async (
-    ctx,
-    { profileJson, jobTitle, companyName, jobDescription, sessionId, boostKeywords },
-  ): Promise<TailorResult> => {
+interface TailorArgs {
+  profileJson: string;
+  jobTitle: string;
+  companyName: string;
+  jobDescription: string;
+  sessionId: string;
+  boostKeywords?: string[];
+}
+
+/**
+ * The shared tailor pass (prompt → completion → strict parse → run log).
+ * Used by the wizard's tailorResume action AND auto-apply so both spend the
+ * same daily budget and log identically.
+ */
+async function runTailor(
+  ctx: ActionCtx,
+  {
+    profileJson,
+    jobTitle,
+    companyName,
+    jobDescription,
+    sessionId,
+    boostKeywords,
+  }: TailorArgs,
+): Promise<TailorResult> {
     const jd = jobDescription.slice(0, MAX_JOB_DESCRIPTION_CHARS);
     const pj = profileJson.slice(0, MAX_PROFILE_JSON_CHARS);
     const boosts = (boostKeywords ?? [])
@@ -400,6 +414,95 @@ export const tailorResume = action({
       ...usage,
     });
     return result;
+}
+
+export const tailorResume = action({
+  args: {
+    profileJson: v.string(),
+    jobTitle: v.string(),
+    companyName: v.string(),
+    jobDescription: v.string(),
+    sessionId: v.string(),
+    boostKeywords: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args): Promise<TailorResult> => runTailor(ctx, args),
+});
+
+/**
+ * Auto-apply (feature: apply to radar results): for each selected listing,
+ * run the full tailor pass (its AI cost shares the daily budget), save the
+ * tailored resume into the owner's collection, and mark the listing applied
+ * with a link out to the posting. Capped at 3 per call so one click can't
+ * drain the budget.
+ */
+export const autoApply = action({
+  args: {
+    jobIds: v.array(v.id("jobMatches")),
+    sessionId: v.string(),
+  },
+  handler: async (ctx, { jobIds, sessionId }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error("You're signed out — sign in to continue.");
+    }
+    const profileData = await ctx.runQuery(internal.jobs.profileForMatch, {
+      userId,
+    });
+    if (!profileData) {
+      throw new Error("Build your master profile first — then auto-apply.");
+    }
+
+    const ids = [...new Set(jobIds)].slice(0, 3);
+    const applied: Array<{
+      jobId: Id<"jobMatches">;
+      score: number;
+      url: string;
+    }> = [];
+
+    for (const jobId of ids) {
+      const match = await ctx.runQuery(internal.jobs.getMatchForUser, {
+        jobId,
+        userId,
+      });
+      if (!match) continue;
+
+      const tailored = await runTailor(ctx, {
+        profileJson: JSON.stringify(profileData.profile),
+        jobTitle: match.title,
+        companyName: match.company,
+        jobDescription: match.description,
+        sessionId,
+        // Feed the deterministic matcher's gaps straight into the rewrite.
+        boostKeywords: match.missingKeywords,
+      });
+
+      const resumeId = await ctx.runMutation(internal.resumes.insertResume, {
+        userId,
+        profileId: profileData.profileId,
+        companyName: match.company,
+        jobTitle: match.title,
+        jobDescription: match.description,
+        score: tailored.score,
+        summary: tailored.summary,
+        skills: tailored.skills,
+        experience: tailored.experience,
+        education: tailored.education,
+        keywords: tailored.keywords,
+        missingKeywords: tailored.missingKeywords,
+        breakdown: tailored.breakdown,
+      });
+
+      await ctx.runMutation(internal.jobs.markApplied, {
+        jobId,
+        userId,
+        resumeId,
+        tailoredScore: tailored.score,
+      });
+
+      applied.push({ jobId, score: tailored.score, url: match.url });
+    }
+
+    return applied;
   },
 });
 

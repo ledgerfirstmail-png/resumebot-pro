@@ -5,9 +5,11 @@ import { motion } from "framer-motion";
 import {
   ArrowRight,
   BadgeCheck,
+  Bell,
   Gauge,
   MousePointerClick,
   Printer,
+  Radar,
   ScrollText,
   Sparkles,
   Target,
@@ -74,6 +76,20 @@ const FEATURES = [
     text: "text-amber-700",
     title: "A collection, not a file",
     body: "Every tailored version is saved with its score, so you can compare which angle wins before you apply.",
+  },
+  {
+    icon: Radar,
+    color: "bg-clay-lilac",
+    text: "text-purple-800",
+    title: "Job radar finds the employers",
+    body: "Scan live job boards in one click — every opening scored against your resume, so you know where you're strong before you apply.",
+  },
+  {
+    icon: Bell,
+    color: "bg-clay-sky",
+    text: "text-sky-800",
+    title: "Auto-apply, then watch",
+    body: "Auto-apply to shortlisted hits with a fresh tailored resume each — and let saved watches email you, or ping Telegram, when new matches land.",
   },
 ];
 
@@ -299,7 +315,8 @@ export default function Landing() {
                 Ready to score your next application?
               </h2>
               <p className="max-w-md text-sm leading-6 text-muted-foreground">
-                Build your profile once. Tailor for every job. Watch the score
+                Build your profile once — then let the job radar bring hiring
+                employers to you, tailor every application, and watch the score
                 climb past what businesses are looking for.
               </p>
               <ClayButton size="lg" onClick={handleGetStarted}>

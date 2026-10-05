@@ -172,6 +172,50 @@ Still open from the D-list: **D4** (17 lint warnings, mostly
 `react-refresh/only-export-components`) and **D5** (one production build —
 kept off by the platform rule against `bun run build`).
 
+## Resolved in the eighth pass (2026-10-05) — Job Radar
+
+Four product features, shipped together as the **Job radar** workspace tab
+(Studio / Job radar switcher in the dashboard header):
+
+- **1 · Find employers hiring + match scoring**: `jobSearch:searchJobs`
+  aggregates three key-free boards (Remotive, RemoteOK, Arbeitnow — all
+  verified reachable with the field shapes the parsers expect), dedupes,
+  filters by query/location, and scores every posting against the owner's
+  profile with a new **pure matcher** (`src/lib/matchScore.ts`: 45 term
+  coverage + 35 skills signal + 20 title fit → 0–100, plus matched/missing
+  keyword lists). Results persist in the new `jobMatches` table and render
+  with score chips, matched-skill chips, gap chips, and a live match
+  threshold slider. Search costs **zero AI credits** — only tailoring does.
+- **2 · Convert the resume to lift the score**: "Tailor to this job" on any
+  radar card runs the existing AI tailor pass (feeding the matcher's
+  `missingKeywords` in as boosts), records the AI score on the card via
+  `jobs:markTailored`, opens the result in the Studio, and quietly re-scans
+  the board in the background so refreshed employers keep rolling in.
+- **3 · Auto-apply**: select cards → `ai:autoApply` (capped at 3 per click so
+  one click can't drain the daily AI budget) runs the shared tailor pass per
+  job, saves each tailored resume into the owner's collection
+  (`resumes:insertResume`, same de-dupe as manual saves), and marks the
+  listing `applied` with its score and a link out to the posting. The
+  platform cannot submit forms on third-party boards — the flow ends with an
+  "Open posting" handoff, stated plainly in the UI.
+- **4 · Email watch + Telegram alerts**: `jobWatches` saved searches sweep
+  hourly via `crons.ts` (55 min interval, 50 min per-watch debounce through
+  the internal `jobSearch:sweepDueWatches`), score fresh listings, and push
+  digests through `notify.ts` — Resend email (`RESEND_API_KEY`) and/or a
+  Telegram bot message (`TELEGRAM_BOT_TOKEN`), with a "Find my chat ID"
+  helper (`getUpdates`). Every path returns a status string, so a missing key
+  degrades to a recorded `skipped:` reason instead of failing the sweep.
+  Client "Run now" reuses the same pipeline with an owner check.
+
+Also: landing page gained two feature cards (radar + auto-apply/watch) and a
+radar-aware CTA. New tests: `matchScore.test.ts` (13 cases) — suite now 45.
+
+Still open: alert **delivery** is unverified until `RESEND_API_KEY` and
+`TELEGRAM_BOT_TOKEN` are pasted into the Keys tab; live authenticated search
+from `convex run` can't be exercised (requires a signed-in session), though
+all three board APIs were verified directly and the sweep ran end-to-end
+against the deployment.
+
 
 ---
 

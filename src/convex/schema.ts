@@ -151,6 +151,61 @@ const schema = defineSchema(
       durationMs: v.optional(v.number()),
       createdAt: v.number(),
     }).index("by_kind", ["kind"]),
+
+    // One live job listing found by the Job Radar search, scored against the
+    // owner's profile with the deterministic matcher (lib/matchScore).
+    jobMatches: defineTable({
+      userId: v.id("users"),
+      // Which board it came from (remotive | remoteok | arbeitnow).
+      source: v.string(),
+      // Stable id/slug on that board — dedupe key with userId.
+      externalId: v.string(),
+      title: v.string(),
+      company: v.string(),
+      // Plain-text posting, capped before insert.
+      description: v.string(),
+      url: v.string(),
+      location: v.string(),
+      postedAt: v.optional(v.number()),
+      // Deterministic 0–100 fit vs the profile at search time.
+      score: v.number(),
+      matchedKeywords: v.array(v.string()),
+      missingKeywords: v.array(v.string()),
+      // new → tailored (AI reworked the resume for it) → applied.
+      status: v.union(
+        v.literal("new"),
+        v.literal("tailored"),
+        v.literal("applied"),
+      ),
+      // AI score from the tailor pass, when one ran.
+      tailoredScore: v.optional(v.number()),
+      // Saved resume produced by auto-apply / tailoring for this posting.
+      resumeId: v.optional(v.id("tailoredResumes")),
+      appliedAt: v.optional(v.number()),
+      createdAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_user_score", ["userId", "score"])
+      .index("by_user_source_ext", ["userId", "source", "externalId"]),
+
+    // A saved Job Radar search that sweeps for new postings and alerts the
+    // owner by email (Resend) and/or Telegram when a fresh match clears the
+    // minimum score.
+    jobWatches: defineTable({
+      userId: v.id("users"),
+      query: v.string(),
+      location: v.optional(v.string()),
+      // Only alert on matches at or above this score.
+      minScore: v.number(),
+      email: v.optional(v.string()),
+      emailEnabled: v.boolean(),
+      telegramChatId: v.optional(v.string()),
+      telegramEnabled: v.boolean(),
+      lastRunAt: v.optional(v.number()),
+      // Human-readable outcome of the last sweep (sent/skipped/failed + count).
+      lastStatus: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index("by_user", ["userId"]),
   },
   {
     schemaValidation: false,

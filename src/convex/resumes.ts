@@ -1,8 +1,8 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx } from "./_generated/server";
-import { scoreLabelValidator } from "./schema";
+import { mutation, internalMutation, query, type MutationCtx } from "./_generated/server";
+import { scoreLabelValidator, type ScoreLabel } from "./schema";
 
 /** Every resume feature requires a signed-in account. */
 async function requireUserId(ctx: MutationCtx): Promise<Id<"users">> {
@@ -137,40 +137,106 @@ export const saveResume = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
-    const profile = await ctx.db.get(args.profileId);
-    if (!profile || profile.userId !== userId) {
-      throw new Error("Profile not found");
-    }
-
-    const { missingKeywords, applicationKit, ...rest } = args;
-    const doc = {
-      ...rest,
-      userId,
-      missingKeywords: missingKeywords ?? [],
-      ...(applicationKit ? { applicationKit } : {}),
-    };
-
-    // De-duplicate: re-saving the same job replaces the previous version
-    // instead of stacking near-identical cards.
-    const existing = await ctx.db
-      .query("tailoredResumes")
-      .withIndex("by_profile", (q) => q.eq("profileId", args.profileId))
-      .collect();
-    const duplicate = existing.find(
-      (r) =>
-        r.jobTitle.trim().toLowerCase() ===
-          args.jobTitle.trim().toLowerCase() &&
-        r.companyName.trim().toLowerCase() ===
-          args.companyName.trim().toLowerCase(),
-    );
-    if (duplicate) {
-      await ctx.db.patch(duplicate._id, { ...doc, createdAt: Date.now() });
-      return duplicate._id;
-    }
-
-    return await ctx.db.insert("tailoredResumes", {
-      ...doc,
-      createdAt: Date.now(),
-    });
+    return await persistResume(ctx, userId, args);
   },
 });
+
+/**
+ * Auto-apply path: the action has already verified the caller, so this
+ * internal mutation takes the owner explicitly. Same de-duplication rules as
+ * saveResume (re-applying to a job replaces its previous copy).
+ */
+export const insertResume = internalMutation({
+  args: {
+    userId: v.id("users"),
+    profileId: v.id("resumeProfiles"),
+    companyName: v.string(),
+    jobTitle: v.string(),
+    jobDescription: v.string(),
+    score: v.number(),
+    summary: v.string(),
+    skills: v.array(v.string()),
+    experience: v.array(experienceValidator),
+    education: v.array(educationValidator),
+    keywords: v.array(v.string()),
+    missingKeywords: v.optional(v.array(v.string())),
+    applicationKit: v.optional(applicationKitValidator),
+    breakdown: breakdownValidator,
+  },
+  handler: async (ctx, { userId, ...args }) => {
+    return await persistResume(ctx, userId, args);
+  },
+});
+
+interface ResumeArgs {
+  profileId: Id<"resumeProfiles">;
+  companyName: string;
+  jobTitle: string;
+  jobDescription: string;
+  score: number;
+  summary: string;
+  skills: string[];
+  experience: Array<{
+    company: string;
+    title: string;
+    startDate: string;
+    endDate: string;
+    bullets: string[];
+  }>;
+  education: Array<{ school: string; degree: string; gradYear: string }>;
+  keywords: string[];
+  missingKeywords?: string[];
+  applicationKit?: {
+    coverLetter: string;
+    whyThisRole: string;
+    answers: Array<{ question: string; answer: string }>;
+  };
+  breakdown: Array<{
+    label: ScoreLabel;
+    score: number;
+    maxScore: number;
+    note: string;
+  }>;
+}
+
+/** Shared insert/replace logic for both save paths. */
+async function persistResume(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  args: ResumeArgs,
+): Promise<Id<"tailoredResumes">> {
+  const profile = await ctx.db.get(args.profileId);
+  if (!profile || profile.userId !== userId) {
+    throw new Error("Profile not found");
+  }
+
+  const { missingKeywords, applicationKit, ...rest } = args;
+  const doc = {
+    ...rest,
+    userId,
+    missingKeywords: missingKeywords ?? [],
+    ...(applicationKit ? { applicationKit } : {}),
+  };
+
+  // De-duplicate: re-saving the same job replaces the previous version
+  // instead of stacking near-identical cards.
+  const existing = await ctx.db
+    .query("tailoredResumes")
+    .withIndex("by_profile", (q) => q.eq("profileId", args.profileId))
+    .collect();
+  const duplicate = existing.find(
+    (r) =>
+      r.jobTitle.trim().toLowerCase() ===
+        args.jobTitle.trim().toLowerCase() &&
+      r.companyName.trim().toLowerCase() === args.companyName.trim().toLowerCase(),
+  );
+  if (duplicate) {
+    await ctx.db.patch(duplicate._id, { ...doc, createdAt: Date.now() });
+    return duplicate._id;
+  }
+
+  return await ctx.db.insert("tailoredResumes", {
+    ...doc,
+    createdAt: Date.now(),
+  });
+}
