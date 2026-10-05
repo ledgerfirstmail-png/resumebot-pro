@@ -20,55 +20,17 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
-import { z } from "zod";
 import { getSessionId } from "@/lib/session";
+import {
+  jobSchema,
+  profileSchema,
+  profileToFormValues,
+  type JobFormValues,
+  type ProfileFormValues,
+} from "@/lib/resumeSchemas";
 import type { ResumeProfileData } from "@/types/resume";
 import { ClayButton } from "./ClayButton";
 import { ClayCard } from "./ClayCard";
-
-const experienceSchema = z.object({
-  company: z.string().min(1, "Company is required"),
-  title: z.string().min(1, "Job title is required"),
-  startDate: z.string().min(1, "Start date is required"),
-  endDate: z.string().min(1, "End date is required"),
-  bulletsText: z.string().min(1, "Add at least one bullet"),
-});
-
-const profileSchema = z.object({
-  fullName: z.string().min(1, "Name is required"),
-  title: z.string().min(1, "Professional title is required"),
-  email: z.string().email("Enter a valid email"),
-  phone: z.string().min(7, "Enter a valid phone number"),
-  location: z.string().min(1, "Location is required"),
-  portfolioUrl: z.string().optional().or(z.literal("")),
-  summary: z.string().min(1, "Write a short professional summary"),
-  skills: z.array(z.string()).min(1, "Add at least one skill"),
-  experience: z.array(experienceSchema).min(1, "Add at least one role"),
-  education: z
-    .array(
-      z.object({
-        school: z.string().min(1, "School is required"),
-        degree: z.string().min(1, "Degree is required"),
-        gradYear: z.string().min(1, "Graduation year is required"),
-      }),
-    )
-    .min(1, "Add at least one school"),
-});
-
-const jobSchema = z.object({
-  jobTitle: z.string().min(2, "Job title is required"),
-  companyName: z.string().min(1, "Company name is required"),
-  jobDescription: z
-    .string()
-    .min(120, "Paste the full job description (at least 120 characters)")
-    .max(
-      20_000,
-      "That posting is huge — trim it to under 20,000 characters",
-    ),
-});
-
-type ProfileFormValues = z.infer<typeof profileSchema>;
-type JobFormValues = z.infer<typeof jobSchema>;
 
 export interface WizardOutput {
   result: TailorResult;
@@ -118,27 +80,6 @@ function ClayField({
       )}
     </label>
   );
-}
-
-function profileToFormValues(profile: ResumeProfileData): ProfileFormValues {
-  return {
-    fullName: profile.fullName,
-    title: profile.title,
-    email: profile.email,
-    phone: profile.phone,
-    location: profile.location,
-    portfolioUrl: profile.portfolioUrl,
-    summary: profile.summary,
-    skills: profile.skills,
-    experience: profile.experience.map((e) => ({
-      company: e.company,
-      title: e.title,
-      startDate: e.startDate,
-      endDate: e.endDate,
-      bulletsText: e.bullets.join("\n"),
-    })),
-    education: profile.education,
-  };
 }
 
 const EMPTY_FORM: ProfileFormValues = {

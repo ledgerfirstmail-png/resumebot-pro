@@ -143,6 +143,35 @@ Still open from auth: verify reset-email **delivery** with a real inbox
 (platform mailer rejected example.com), optional email verification on
 sign-up, and session management UI (change password from settings).
 
+## Resolved in the seventh pass (2026-10-05)
+
+- **D1 ✅ — tests**: Vitest installed with a `bun run test` script and its own
+  `vitest.config.ts` (kept separate — `vite.config.ts` is platform-owned).
+  35 tests over the pure logic the roadmap called out: `extractJson`
+  (plain/fenced/prose/unparsable), `clampScore` (clamping, coercion,
+  fallbacks), `assertPublicHttpUrl` (public http(s) allowed; localhost,
+  loopback, `10.*`, `192.168.*`, `172.16–31.*`, `169.254.*`, `*.local` and
+  non-http schemes rejected), `htmlToText` (script/style stripping, entity
+  decoding in one pass incl. `&amp;lt;`, whitespace collapsing), the wizard's
+  zod schemas (`jobSchema` 120/20,000 limits, `profileSchema` required
+  fields), `profileToFormValues` (bullet join), and `buildDiff` (company+title
+  matching, positional fallback, dropped bullets, unchanged filtering, skill
+  adds/removes, summary change). To make these testable, the helpers moved
+  out of Convex/React into `src/lib/aiParse.ts`, `src/lib/resumeSchemas.ts`,
+  and `src/lib/bulletDiff.ts` — `ai.ts`, `ResumeWizard.tsx`, and
+  `BeforeAfterDiff.tsx` now import them (single source of truth, no
+  behavior change).
+- **D2 ✅ — CI**: `.github/workflows/ci.yml` runs on pushes to `main` and
+  every PR: `bun install` → `bunx convex codegen` → `bun tsc -b --noEmit` →
+  `bun run lint` → `bun run test`. Codegen comes first because
+  `src/convex/_generated` is gitignored; verified it exits 0 without Convex
+  authentication (empty `HOME`, no deployment env vars). Lint is safe as a
+  gate: it exits 0 today (0 errors, 17 pre-existing warnings).
+
+Still open from the D-list: **D4** (17 lint warnings, mostly
+`react-refresh/only-export-components`) and **D5** (one production build —
+kept off by the platform rule against `bun run build`).
+
 
 ---
 
