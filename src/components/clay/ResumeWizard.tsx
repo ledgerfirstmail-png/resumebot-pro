@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 import type { ResumeProfileData } from "@/types/resume";
@@ -169,7 +169,7 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
     control: profileForm.control,
     name: "education",
   });
-  const skills = profileForm.watch("skills");
+  const skills = useWatch({ control: profileForm.control, name: "skills" });
 
   const jobForm = useForm<JobFormValues>({
     resolver: zodResolver(jobSchema),
@@ -245,6 +245,11 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
       setIsGenerating(false);
     }
   };
+
+  const jobDescription = useWatch({
+    control: jobForm.control,
+    name: "jobDescription",
+  });
 
   const experienceError =
     profileForm.formState.errors.experience?.message ??
@@ -672,7 +677,7 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
             </div>
             <ClayField
               label="Paste the full job description"
-              hint={`${jobForm.watch("jobDescription").length} chars`}
+              hint={`${jobDescription.length} chars`}
               error={jobForm.formState.errors.jobDescription?.message}
             >
               <textarea

@@ -46,11 +46,18 @@ STRICT RULES:
 5. Tailor the professional summary to the target job title and company.
 6. Reply with ONLY the JSON object. No markdown fences, no commentary.`;
 
-function buildUserPrompt(profileJson: string, jobDescription: string) {
+function buildUserPrompt(
+  profileJson: string,
+  jobTitle: string,
+  companyName: string,
+  jobDescription: string,
+) {
   return `The candidate's master resume profile:
 <profile>
 ${profileJson}
 </profile>
+
+Target role: ${jobTitle}${companyName ? ` at ${companyName}` : ""}
 
 The job description to tailor against:
 <job_description>
@@ -137,7 +144,7 @@ export const tailorResume = action({
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
-          content: buildUserPrompt(profileJson, jobDescription),
+          content: buildUserPrompt(profileJson, jobTitle, companyName, jobDescription),
         },
       ],
       temperature: 0.4,

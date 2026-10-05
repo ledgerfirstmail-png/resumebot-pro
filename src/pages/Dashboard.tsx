@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [result, setResult] = useState<{
     jobTitle: string;
     companyName: string;
+    jobDescription: string;
     result: TailorResult;
   } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -45,6 +46,7 @@ export default function Dashboard() {
     setResult({
       jobTitle: output.job.jobTitle,
       companyName: output.job.companyName,
+      jobDescription: output.job.jobDescription,
       result: output.result,
     });
     setViewingSaved(false);
@@ -66,7 +68,7 @@ export default function Dashboard() {
         profileId: profile._id,
         companyName: result.companyName,
         jobTitle: result.jobTitle,
-        jobDescription: "",
+        jobDescription: result.jobDescription,
         score: result.result.score,
         summary: result.result.summary,
         skills: result.result.skills,
@@ -92,6 +94,7 @@ export default function Dashboard() {
     setResult({
       jobTitle: resume.jobTitle,
       companyName: resume.companyName,
+      jobDescription: resume.jobDescription,
       result: {
         score: resume.score,
         summary: resume.summary,
