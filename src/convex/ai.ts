@@ -3,6 +3,10 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { vly } from "../lib/vly-integrations";
 import { assertPublicHttpUrl, clampScore, extractJson, htmlToText } from "../lib/aiParse";
+import {
+  normalizeParsedResume,
+  type ProfileFormValues,
+} from "../lib/resumeSchemas";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { AiRunKind, ScoreLabel } from "./schema";
@@ -730,5 +734,94 @@ export const extractJobPosting = action({
       ...usage,
     });
     return result;
+  },
+});
+
+/** --- Résumé paste-import (B5) --- */
+
+/** Cap on pasted resume text fed to the AI (~8k tokens — plenty for a CV). */
+const MAX_RESUME_TEXT_CHARS = 30_000;
+
+const PARSE_SYSTEM_PROMPT = `You extract a person's resume into a fixed JSON shape.
+
+STRICT RULES:
+1. Reply with ONLY the JSON object. No markdown fences, no commentary.
+2. The shape is exactly:
+{"fullName": "", "title": "", "email": "", "phone": "", "location": "", "portfolioUrl": "", "summary": "", "skills": [""], "experience": [{"company": "", "title": "", "startDate": "", "endDate": "", "bulletsText": ""}], "education": [{"school": "", "degree": "", "gradYear": ""}]}
+3. bulletsText holds the role's bullet points separated by newline characters, one bullet per line.
+4. Use "" or [] when something is absent. Never invent details, employers, dates, or skills that are not in the text.
+5. title is the person's professional headline; if none is stated, use their most recent role title.
+6. summary is the profile/summary section in the person's own words (compress only if it is very long).
+7. Copy dates exactly as written (e.g. "Mar 2021", "2020 – present").
+8. At most 30 skills, 12 experience entries, and 8 education entries.`;
+
+function buildParsePrompt(text: string) {
+  return `Resume text (truncated):\n<resume_text>\n${text}\n</resume_text>\n\nExtract the resume as the JSON object described.`;
+}
+
+/**
+ * Parse pasted plain-text resume content into the wizard's step-1 form shape
+ * (B5) so users don't retype everything. Shares the daily budget, the
+ * retry loop, and the structured run log with the other AI actions; the raw
+ * payload is normalized (and content-checked) by `normalizeParsedResume`.
+ */
+export const parseResumeText = action({
+  args: { text: v.string(), sessionId: v.string() },
+  handler: async (ctx, { text, sessionId }): Promise<ProfileFormValues> => {
+    const sid = sessionId.trim().slice(0, 64) || "anonymous";
+    const source = text.trim();
+    if (source.length < 120) {
+      throw new Error(
+        "Paste your resume as text — at least a short paragraph — and try again.",
+      );
+    }
+    const clipped = source.slice(0, MAX_RESUME_TEXT_CHARS);
+
+    await enforceDailyBudget(ctx, sid);
+    const startedAt = Date.now();
+    const usage: CompletionUsage = {};
+
+    const fail = async (err: unknown): Promise<never> => {
+      await logAiRun(ctx, {
+        sessionId: sid,
+        kind: "parse",
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - startedAt,
+        ...usage,
+      });
+      throw err;
+    };
+
+    let parsed: unknown;
+    try {
+      parsed = await completeToJson(
+        PARSE_SYSTEM_PROMPT,
+        buildParsePrompt(clipped),
+        4000,
+        "Try again with a cleaner copy of your resume text.",
+        usage,
+      );
+    } catch (err) {
+      return fail(err);
+    }
+
+    const normalized = normalizeParsedResume(parsed);
+    if (!normalized) {
+      return fail(
+        new Error(
+          "That text didn't look like a resume we could read — paste the plain text of your resume and try again.",
+        ),
+      );
+    }
+
+    await logAiRun(ctx, {
+      sessionId: sid,
+      kind: "parse",
+      ok: true,
+      durationMs: Date.now() - startedAt,
+      ...usage,
+    });
+    return normalized;
   },
 });

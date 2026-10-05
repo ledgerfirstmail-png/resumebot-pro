@@ -31,6 +31,7 @@ export const aiRunKindValidator = v.union(
   v.literal("tailor"),
   v.literal("kit"),
   v.literal("extract"),
+  v.literal("parse"),
 );
 export type AiRunKind = Infer<typeof aiRunKindValidator>;
 
@@ -149,8 +150,9 @@ const schema = defineSchema(
       tokensOut: v.optional(v.number()),
       credits: v.optional(v.number()),
       durationMs: v.optional(v.number()),
-      createdAt: v.number(),
-    }).index("by_kind", ["kind"]),
+      createdAt: v.number(),    })
+      .index("by_kind", ["kind"])
+      .index("by_session_time", ["sessionId", "createdAt"]),
 
     // One live job listing found by the Job Radar search, scored against the
     // owner's profile with the deterministic matcher (lib/matchScore).
@@ -171,11 +173,14 @@ const schema = defineSchema(
       score: v.number(),
       matchedKeywords: v.array(v.string()),
       missingKeywords: v.array(v.string()),
-      // new → tailored (AI reworked the resume for it) → applied.
+      // new → tailored (AI reworked the resume for it) → applied →
+      // interview / rejected (manual pipeline tracking).
       status: v.union(
         v.literal("new"),
         v.literal("tailored"),
         v.literal("applied"),
+        v.literal("interview"),
+        v.literal("rejected"),
       ),
       // AI score from the tailor pass, when one ran.
       tailoredScore: v.optional(v.number()),

@@ -18,7 +18,12 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+
+    /* Mirror the app's `@/` alias so shared lib modules (e.g. ../lib/*)
+       typecheck inside the Convex project too. */
+    "baseUrl": "..",
+    "paths": { "@/*": ["*"] }
   },
   "include": ["./**/*"],
   "exclude": ["./_generated"]

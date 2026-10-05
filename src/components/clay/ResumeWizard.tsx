@@ -8,6 +8,7 @@ import {
   Briefcase,
   ChevronLeft,
   ChevronRight,
+  ClipboardPaste,
   Link2,
   Loader2,
   Plus,
@@ -23,6 +24,7 @@ import { toast } from "sonner";
 import { getSessionId } from "@/lib/session";
 import {
   jobSchema,
+  mergeFormValues,
   profileSchema,
   profileToFormValues,
   type JobFormValues,
@@ -148,6 +150,10 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
   const saveProfile = useMutation(api.resumes.saveProfile);
   const tailorResume = useAction(api.ai.tailorResume);
   const extractJobPosting = useAction(api.ai.extractJobPosting);
+  const parseResumeText = useAction(api.ai.parseResumeText);
+  const [resumeDraft, setResumeDraft] = useState("");
+  const [isParsing, setIsParsing] = useState(false);
+  const [showResumeImport, setShowResumeImport] = useState(false);
 
   const profileForm = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
@@ -260,6 +266,36 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
       );
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  /** B5 — paste plain-text resume → AI parse → fill only the empty fields. */
+  const handleParseResume = async () => {
+    const text = resumeDraft.trim();
+    if (text.length < 120) {
+      toast.error("Paste at least a few lines of your resume text first.");
+      return;
+    }
+    setIsParsing(true);
+    try {
+      const parsed = await parseResumeText({
+        text,
+        sessionId: getSessionId(),
+      });
+      profileForm.reset(mergeFormValues(profileForm.getValues(), parsed));
+      setResumeDraft("");
+      setShowResumeImport(false);
+      toast.success(
+        "Resume imported — review each field before generating.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't read that resume — paste a cleaner copy and try again.",
+      );
+    } finally {
+      setIsParsing(false);
     }
   };
 
@@ -383,6 +419,51 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
             onSubmit={profileForm.handleSubmit(() => setStep(1))}
             className="flex flex-col gap-5"
           >
+            <div className="rounded-2xl border border-dashed border-border/70 bg-background/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <ClipboardPaste className="size-4 text-primary" />
+                  Have a resume already? Paste it and skip the typing.
+                </div>
+                <ClayButton
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowResumeImport((v) => !v)}
+                  aria-expanded={showResumeImport}
+                >
+                  {showResumeImport ? "Not now" : "Paste to autofill"}
+                </ClayButton>
+              </div>
+              {showResumeImport && (
+                <div className="mt-3 flex flex-col gap-2">
+                  <textarea
+                    className={FIELD_TEXTAREA}
+                    value={resumeDraft}
+                    onChange={(e) => setResumeDraft(e.target.value)}
+                    placeholder="Paste your resume as plain text — contact details, summary, roles, bullets, education…"
+                    aria-label="Resume text to import"
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ClayButton
+                      onClick={handleParseResume}
+                      disabled={isParsing}
+                    >
+                      {isParsing ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <Sparkles />
+                      )}
+                      {isParsing ? "Reading…" : "Autofill my profile"}
+                    </ClayButton>
+                    <span className="text-xs text-muted-foreground">
+                      Fills whatever is empty — anything you already typed is
+                      kept. Counts toward your daily AI budget.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <ClayField
                 label="Full name"

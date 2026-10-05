@@ -1,5 +1,9 @@
 import { v } from "convex/values";
-import { internalMutation, internalQuery } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  query,
+} from "./_generated/server";
 import { aiRunKindValidator } from "./schema";
 
 /**
@@ -103,5 +107,54 @@ export const recentRuns = internalQuery({
       credits: r.credits,
       durationMs: r.durationMs,
     }));
+  },
+});
+
+/**
+ * Today's AI usage for one browser session — surfaced in the dashboard so
+ * the daily budget is visible instead of a surprise (E7 remainder): calls
+ * used vs. the limit, run counts/failures, and token/credit spend over the
+ * last 24 hours from the structured run log.
+ */
+export const usageSummary = query({
+  args: { sessionId: v.string() },
+  handler: async (ctx, { sessionId }) => {
+    const day = new Date().toISOString().slice(0, 10);
+    const record = await ctx.db
+      .query("aiCalls")
+      .withIndex("by_session_day", (q) =>
+        q.eq("sessionId", sessionId).eq("day", day),
+      )
+      .unique();
+
+    const since = Date.now() - 24 * 3_600_000;
+    const runs = await ctx.db
+      .query("aiRuns")
+      .withIndex("by_session_time", (q) =>
+        q.eq("sessionId", sessionId).gte("createdAt", since),
+      )
+      .order("desc")
+      .take(100);
+
+    let tokensIn = 0;
+    let tokensOut = 0;
+    let credits = 0;
+    let failures = 0;
+    for (const run of runs) {
+      tokensIn += run.tokensIn ?? 0;
+      tokensOut += run.tokensOut ?? 0;
+      credits += run.credits ?? 0;
+      if (!run.ok) failures += 1;
+    }
+
+    return {
+      usedToday: record?.count ?? 0,
+      limit: MAX_AI_CALLS_PER_DAY,
+      runsToday: runs.length,
+      failuresToday: failures,
+      tokensIn,
+      tokensOut,
+      credits: credits > 0 ? credits : 0,
+    };
   },
 });

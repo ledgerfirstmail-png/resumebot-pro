@@ -26,6 +26,9 @@ type SavedResume = Doc<"tailoredResumes">;
 export default function Dashboard() {
   const profile = useQuery(api.resumes.getProfile);
   const resumes = useQuery(api.resumes.listResumes);
+  // Stable session key for the usage chip (getSessionId is read-only).
+  const [sessionKey] = useState(() => getSessionId());
+  const usage = useQuery(api.aiUsage.usageSummary, { sessionId: sessionKey });
   const saveResume = useMutation(api.resumes.saveResume);
   const tailorResume = useAction(api.ai.tailorResume);
   const generateKit = useAction(api.ai.generateApplicationKit);
@@ -285,6 +288,21 @@ export default function Dashboard() {
                   ? "Live openings scored against your resume — tailor, auto-apply, and watch for new matches."
                   : "Tailor your resume to any job posting and score what businesses are looking for."}
               </p>
+              {usage && usage.usedToday > 0 && (
+                <p
+                  className="mt-1 text-xs font-semibold text-muted-foreground"
+                  title="AI usage for this browser session over the last day"
+                >
+                  AI today: {usage.usedToday}/{usage.limit} runs
+                  {usage.tokensIn + usage.tokensOut > 0
+                    ? ` · ${usage.tokensIn + usage.tokensOut} tokens`
+                    : ""}
+                  {usage.credits > 0 ? ` · ${usage.credits} credits` : ""}
+                  {usage.failuresToday > 0
+                    ? ` · ${usage.failuresToday} failed`
+                    : ""}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <div

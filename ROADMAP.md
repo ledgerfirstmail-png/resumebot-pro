@@ -228,6 +228,47 @@ from `convex run` can't be exercised (requires a signed-in session), though
 all three board APIs were verified directly and the sweep ran end-to-end
 against the deployment.
 
+## Resolved in the ninth pass (2026-10-05) — import, pipeline, usage
+
+- **B5 ✅ — resume paste-import**: new `ai:parseResumeText` action parses
+  pasted plain-text resume content straight into the wizard's step-1 form
+  shape — shares the daily budget, retry loop, and the run log (new `parse`
+  kind; 30k-char input cap, fails fast with a friendly error below 120
+  chars). Two new pure helpers in `src/lib/resumeSchemas.ts`:
+  `normalizeParsedResume` (trims/caps every field, de-dupes skills, accepts
+  bullets as an array **or** pre-joined `bulletsText`, drops content-free
+  rows, returns `null` when there's no usable resume) and `mergeFormValues`
+  (fills only empty fields — anything the user already typed wins).
+  Wizard step 1 gained a dashed **“Paste to autofill”** panel. Live-verified
+  end-to-end: a full sample resume parsed with every field correct
+  (469/230 tokens, 6.8s, logged `kind: "parse"`, `ok: true`); undersized
+  input rejected before any budget spend.
+- **E3 remainder ✅ — real pipeline statuses**: `jobMatches.status` now
+  includes `interview` and `rejected`; new owner-checked
+  `jobs:setJobStatus` mutation drives **Interview / Reject / Restore**
+  buttons on radar cards (with a confirming toast). Re-scans only ever
+  patch listing content — never `status` — so manual progress survives the
+  next sweep, and the 150-row prune still only touches plain `new` rows.
+  Tailor + auto-apply are disabled once a card is applied/interviewing/
+  rejected.
+- **E7 remainder ✅ — usage visibility**: new public
+  `aiUsage:usageSummary` query (calls used vs. the 25/day limit, runs and
+  failures, tokens + credits over 24h via a new `aiRuns.by_session_time`
+  index) surfaced as an **“AI today: N/25 runs · tokens · credits”** line
+  under the dashboard greeting whenever there is usage today.
+- **Tooling**: `src/convex/tsconfig.json` gained the app's `@/*` path alias
+  so shared `src/lib` modules typecheck inside the Convex project (their
+  `@/` imports previously failed Convex's own `tsc` pass).
+
+Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0 errors,
+0 warnings under `--max-warnings=0`), **53/53 tests** (8 new —
+normalize/merge coverage), plus the live parse smoke test above.
+
+Still open: **D5** (production build — platform rule), C1/C2/C9
+(docs, manifest, OG metadata), C6/C7 (a11y + mobile visual passes), B6
+(true PDF export), E-list 11/12 (shareable link, multi-profile), and
+alert delivery keys.
+
 
 ---
 

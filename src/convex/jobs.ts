@@ -160,6 +160,36 @@ export const listMatches = query({
   },
 });
 
+/**
+ * Move a listing through the pipeline by hand (E3 remainder): tailored →
+ * applied → interview → rejected. Owner-checked; re-scans never touch a
+ * non-"new" status, so manual progress survives the next search.
+ */
+export const setJobStatus = mutation({
+  args: {
+    jobId: v.id("jobMatches"),
+    status: v.union(
+      v.literal("new"),
+      v.literal("tailored"),
+      v.literal("applied"),
+      v.literal("interview"),
+      v.literal("rejected"),
+    ),
+  },
+  handler: async (ctx, { jobId, status }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error("You're signed out — sign in to continue.");
+    }
+    const doc = await ctx.db.get(jobId);
+    if (!doc || doc.userId !== userId) {
+      throw new Error("Listing not found.");
+    }
+    await ctx.db.patch(jobId, { status });
+    return status;
+  },
+});
+
 /** One radar match, owner-checked — used by auto-apply (ai.ts). */
 export const getMatchForUser = internalQuery({
   args: { jobId: v.id("jobMatches"), userId: v.id("users") },

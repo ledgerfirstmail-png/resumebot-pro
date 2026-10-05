@@ -68,6 +68,8 @@ export function JobRadar({
   const autoApply = useAction(api.ai.autoApply);
   const resolveTelegramChat = useAction(api.notify.resolveTelegramChat);
   const markTailored = useMutation(api.jobs.markTailored);
+  const setJobStatus = useMutation(api.jobs.setJobStatus);
+  const [statusId, setStatusId] = useState<string | null>(null);
   const saveWatch = useMutation(api.jobs.saveWatch);
   const deleteWatch = useMutation(api.jobs.deleteWatch);
 
@@ -197,6 +199,30 @@ export function JobRadar({
       );
     } finally {
       setIsAutoApplying(false);
+    }
+  };
+
+  /** Manual pipeline moves: interview / rejected / restore (E3 remainder). */
+  const handleStatus = async (
+    match: JobMatch,
+    status: "new" | "tailored" | "interview" | "rejected",
+  ) => {
+    setStatusId(match._id);
+    try {
+      await setJobStatus({ jobId: match._id, status });
+      toast.success(
+        status === "interview"
+          ? `“${match.title}” marked as interview — nice.`
+          : status === "rejected"
+            ? `“${match.title}” marked as rejected.`
+            : `“${match.title}” moved back to the pipeline.`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't update that listing.",
+      );
+    } finally {
+      setStatusId(null);
     }
   };
 
@@ -389,6 +415,8 @@ export function JobRadar({
                     : match.status === "tailored" && match.tailoredScore != null
                       ? ` · tailored to ${match.tailoredScore}%`
                       : ""}
+                  {match.status === "interview" ? " · interviewing" : ""}
+                  {match.status === "rejected" ? " · rejected" : ""}
                 </p>
 
                 {match.matchedKeywords.length > 0 && (
@@ -417,7 +445,12 @@ export function JobRadar({
                   <ClayButton
                     size="sm"
                     onClick={() => handleTailor(match)}
-                    disabled={tailoringId !== null || match.status === "applied"}
+                    disabled={
+                      tailoringId !== null ||
+                      match.status === "applied" ||
+                      match.status === "interview" ||
+                      match.status === "rejected"
+                    }
                     title="Rewrite your resume for this posting and score it"
                   >
                     {tailoringId === match._id ? (
@@ -437,12 +470,62 @@ export function JobRadar({
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => toggleSelected(match._id)}
-                      disabled={match.status === "applied"}
+                      disabled={
+                        match.status === "applied" ||
+                        match.status === "interview" ||
+                        match.status === "rejected"
+                      }
                       className="size-4 accent-primary"
                       aria-label={`Select ${match.title} for auto-apply`}
                     />
                     Auto-apply
                   </label>
+
+                  {(match.status === "tailored" ||
+                    match.status === "applied") && (
+                    <>
+                      <ClayButton
+                        size="sm"
+                        variant="soft"
+                        onClick={() => handleStatus(match, "interview")}
+                        disabled={statusId === match._id}
+                        title="Mark as interviewing"
+                      >
+                        Interview
+                      </ClayButton>
+                      <ClayButton
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleStatus(match, "rejected")}
+                        disabled={statusId === match._id}
+                        title="Mark as rejected"
+                      >
+                        Reject
+                      </ClayButton>
+                    </>
+                  )}
+                  {match.status === "interview" && (
+                    <ClayButton
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleStatus(match, "rejected")}
+                      disabled={statusId === match._id}
+                      title="Mark as rejected"
+                    >
+                      Reject
+                    </ClayButton>
+                  )}
+                  {match.status === "rejected" && (
+                    <ClayButton
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleStatus(match, "new")}
+                      disabled={statusId === match._id}
+                      title="Move back into the pipeline"
+                    >
+                      Restore
+                    </ClayButton>
+                  )}
 
                   <a
                     href={match.url}

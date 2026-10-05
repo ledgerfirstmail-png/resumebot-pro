@@ -46,6 +46,139 @@ export const jobSchema = z.object({
 export type ProfileFormValues = z.infer<typeof profileSchema>;
 export type JobFormValues = z.infer<typeof jobSchema>;
 
+/** --- B5: normalize an AI-parsed resume into the wizard's form shape --- */
+
+const str = (value: unknown, max: number): string =>
+  typeof value === "string" ? value.trim().slice(0, max) : "";
+
+/** Trim, cap, drop empties, and de-duplicate a string list. */
+function strArray(value: unknown, maxItems: number, maxLen: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    const s = str(item, maxLen);
+    if (!s) continue;
+    if (out.some((x) => x.toLowerCase() === s.toLowerCase())) continue;
+    out.push(s);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+/**
+ * Coerce the AI's parsed JSON into the exact wizard form shape: strings
+ * trimmed/capped, skills de-duplicated, experience entries requiring at
+ * least a company or title, bullets accepted as an array or a pre-joined
+ * `bulletsText` string. Returns `null` when the payload carries no usable
+ * resume content at all (so the caller can show a friendly error).
+ */
+export function normalizeParsedResume(raw: unknown): ProfileFormValues | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+
+  const experience: ProfileFormValues["experience"] = [];
+  if (Array.isArray(r.experience)) {
+    for (const item of r.experience) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const bulletsText =
+        str(row.bulletsText, 6_000) ||
+        (Array.isArray(row.bullets)
+          ? strArray(row.bullets, 12, 500).join("\n")
+          : "");
+      const entry = {
+        company: str(row.company, 160),
+        title: str(row.title, 160),
+        startDate: str(row.startDate, 40),
+        endDate: str(row.endDate, 40),
+        bulletsText,
+      };
+      if (!entry.company && !entry.title) continue;
+      experience.push(entry);
+      if (experience.length >= 12) break;
+    }
+  }
+
+  const education: ProfileFormValues["education"] = [];
+  if (Array.isArray(r.education)) {
+    for (const item of r.education) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const entry = {
+        school: str(row.school, 200),
+        degree: str(row.degree, 200),
+        gradYear: str(row.gradYear, 20),
+      };
+      if (!entry.school && !entry.degree) continue;
+      education.push(entry);
+      if (education.length >= 8) break;
+    }
+  }
+
+  const out: ProfileFormValues = {
+    fullName: str(r.fullName, 120),
+    title: str(r.title, 160),
+    email: str(r.email, 200),
+    phone: str(r.phone, 60),
+    location: str(r.location, 160),
+    portfolioUrl: str(r.portfolioUrl, 300),
+    summary: str(r.summary, 1_500),
+    skills: strArray(r.skills, 30, 80),
+    experience,
+    education,
+  };
+
+  const hasContent = Boolean(
+    out.fullName ||
+      out.summary ||
+      out.skills.length ||
+      out.experience.length ||
+      out.education.length,
+  );
+  return hasContent ? out : null;
+}
+
+/**
+ * Merge an imported resume into the current form without clobbering
+ * anything the user already typed: filled scalar fields, a non-empty skill
+ * list, or a populated experience/education list always win; the import
+ * only fills what's still empty.
+ */
+export function mergeFormValues(
+  current: ProfileFormValues,
+  incoming: ProfileFormValues,
+): ProfileFormValues {
+  const filled = (s: string) => s.trim().length > 0;
+  const pick = (cur: string | undefined, next: string | undefined): string =>
+    filled(cur ?? "") ? (cur ?? "") : (next ?? "");
+
+  const currentHasExperience = current.experience.some(
+    (e) => filled(e.company) || filled(e.title) || filled(e.bulletsText),
+  );
+  const currentHasEducation = current.education.some(
+    (e) => filled(e.school) || filled(e.degree),
+  );
+
+  return {
+    fullName: pick(current.fullName, incoming.fullName),
+    title: pick(current.title, incoming.title),
+    email: pick(current.email, incoming.email),
+    phone: pick(current.phone, incoming.phone),
+    location: pick(current.location, incoming.location),
+    portfolioUrl: pick(current.portfolioUrl, incoming.portfolioUrl),
+    summary: pick(current.summary, incoming.summary),
+    skills: current.skills.length > 0 ? current.skills : incoming.skills,
+    experience:
+      currentHasExperience || incoming.experience.length === 0
+        ? current.experience
+        : incoming.experience,
+    education:
+      currentHasEducation || incoming.education.length === 0
+        ? current.education
+        : incoming.education,
+  };
+}
+
 /** Map a stored resume profile into the wizard's step-1 form shape. */
 export function profileToFormValues(
   profile: ResumeProfileData,
