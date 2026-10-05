@@ -101,6 +101,10 @@ export function htmlToText(html: string): string {
     })
     .replace(/&amp;/gi, "&"); // must run last so &amp;lt; survives one pass
   return decoded
+    // Some boards entity-escape their HTML (&lt;div&gt;…): after decoding,
+    // strip markup that only became visible now so tag soup never reaches
+    // the matcher or the model.
+    .replace(/<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?\/?>/g, " ")
     .replace(/[^\S\n]+/g, " ")
     .replace(/ ?\n ?/g, "\n")
     .replace(/\n{3,}/g, "\n\n")

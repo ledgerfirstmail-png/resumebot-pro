@@ -284,6 +284,38 @@ alert delivery keys.
 
 Verified: `tsc -b --noEmit` 0, lint 0 (0 errors/0 warnings), tests 53/53.
 
+## Resolved in the eleventh pass (2026-10-05) — "I don't see the list of jobs"
+
+Root-caused with real deployment data (`convex data jobMatches`): the
+auto-scan HAD worked (71 listings stored ~9 min earlier) but **the default
+`minScore = 40` threshold hid every one of them** (score distribution
+0–19). Two quality bugs were also found in that data:
+
+- **Visibility**: default match threshold 40 → **0** so saved listings
+  always render (slider still filters up); results keep the "Job listings"
+  header with `N of M · sorted by match`.
+- **Entity-escaped markup** (Arbeitnow returns `&lt;div&gt;`-escaped HTML):
+  `htmlToText` stripped tags *before* decoding, so decoded markup leaked
+  into descriptions — the matcher then tokenized `h2`/`li`/`ul` as keywords.
+  Fixed with a post-decode tag-shaped strip pass in `src/lib/aiParse.ts`
+  (+test); verified live against the same posting.
+- **German filler flooding the scorer**: Arbeitnow's German postings let
+  non-stopword filler (`und`, `die`, `der`, `mit`…) dominate the top-26
+  terms — depressing coverage scores and filling gap chips with noise.
+  `src/lib/matchScore.ts` STOPWORDS gained a curated German function-word
+  list (umlaut-free forms only — `tokenize` splits on non-ASCII; ambiguous
+  English words like `an/am/war/man` deliberately excluded) plus markup
+  residue tokens (`amp`, `nbsp`, `ll`, `lt`…). Live re-probe: German filler
+  in missing-keywords = none.
+- **Stale rows self-heal**: `jobMatches` gained `scoredAt` (set on insert
+  and every upsert patch); the radar's mount effect now re-scans when the
+  freshest score is older than 30 min, so parser/scoring fixes reach
+  stored listings without a manual scan.
+
+Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
+**54/54 tests**, live probes on real board data (escaped markup stripped ✓,
+German filler gone ✓, relevance ordering preserved).
+
 
 ---
 

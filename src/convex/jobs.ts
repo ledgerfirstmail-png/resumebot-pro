@@ -105,6 +105,7 @@ export const upsertMatches = internalMutation({
           location: item.location,
           postedAt: item.postedAt,
           score: item.score,
+          scoredAt: Date.now(),
           matchedKeywords: item.matchedKeywords,
           missingKeywords: item.missingKeywords,
         });
@@ -114,6 +115,7 @@ export const upsertMatches = internalMutation({
           ...item,
           userId,
           status: "new",
+          scoredAt: Date.now(),
           createdAt: Date.now(),
         });
         fresh.push({

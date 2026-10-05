@@ -122,4 +122,12 @@ describe("htmlToText", () => {
     const out = htmlToText("<p>too   many\n\n\n   spaces</p>");
     expect(out).toBe("too many\n\nspaces");
   });
+
+  it("strips markup that was entity-escaped in the source", () => {
+    // Some boards (e.g. Arbeitnow) return &lt;div&gt;-escaped HTML — the
+    // tags only appear after decoding, so a second strip pass runs.
+    const escaped =
+      "&lt;div class=&quot;intro&quot;&gt;&lt;p&gt;Hello &lt;b&gt;world&lt;/b&gt;&lt;/p&gt;&lt;/div&gt;";
+    expect(htmlToText(escaped)).toBe("Hello world");
+  });
 });

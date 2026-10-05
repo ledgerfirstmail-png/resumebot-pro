@@ -54,6 +54,27 @@ export const STOPWORDS = new Set([
   "equal", "opportunity", "benefits", "salary", "compensation", "range",
   "offer", "offers", "hiring", "company", "business", "market", "year",
   "years", "month", "months", "day", "days", "week", "weeks",
+
+  // German function words: auto-scanned EU boards (e.g. Arbeitnow) return
+  // German postings, and English-only stopwords let filler like "und"/"die"
+  // flood the top-26 terms — depressing coverage scores and polluting the
+  // gap chips. Umlaut-free forms only: tokenize() splits on non-ASCII, so
+  // "über" never survives as one token anyway. Ambiguous-with-English words
+  // (an, am, war, da, um, man, was) are deliberately left out.
+  "und", "oder", "aber", "denn", "weil", "dass", "wenn", "als", "wie",
+  "nicht", "kein", "keine", "keinen", "sich", "wir", "du", "ich", "mir",
+  "mich", "dich", "dir", "uns", "diese", "dieser", "dieses", "diesen",
+  "dem", "den", "der", "die", "das", "ein", "eine", "einen", "einem",
+  "einer", "eines", "ist", "sind", "waren", "wird", "werden", "wurde",
+  "worden", "hat", "haben", "hatte", "hatten", "sein", "seine", "seinen",
+  "seiner", "bei", "aus", "auf", "im", "vor", "nach", "zwischen", "mit",
+  "von", "zu", "zum", "zur", "des", "doch", "dann", "dort", "hier",
+  "sehr", "mehr", "schon", "noch", "nur", "auch", "seit", "vom", "beim",
+  "sowie", "dabei", "davon", "dazu", "bereits",
+
+  // Markup/entity residue ("you'll" → "ll", "&amp;" → "amp") that can
+  // survive text cleanup in board feeds — noise, never fit signal.
+  "ll", "re", "ve", "amp", "nbsp", "quot", "apos", "lt", "gt",
 ]);
 
 /**

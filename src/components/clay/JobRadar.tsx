@@ -80,7 +80,7 @@ export function JobRadar({
   // synchronously inside the effect) so the empty state can show "pulling
   // listings…" while the first silent scan runs.
   const [autoScanDone, setAutoScanDone] = useState(false);
-  const [minScore, setMinScore] = useState(40);
+  const [minScore, setMinScore] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tailoringId, setTailoringId] = useState<string | null>(null);
   const [isAutoApplying, setIsAutoApplying] = useState(false);
@@ -112,7 +112,15 @@ export function JobRadar({
   useEffect(() => {
     if (autoScanned.current || !hasProfile || matches === undefined) return;
     autoScanned.current = true;
-    if (matches.length > 0) return; // already have listings to show
+    if (matches.length > 0) {
+      // Refresh stale scores (parser/matcher fixes must reach stored rows;
+      // upserts patch description + score in place).
+      const freshest = matches.reduce(
+        (max, m) => Math.max(max, m.scoredAt ?? 0),
+        0,
+      );
+      if (freshest > Date.now() - 30 * 60_000) return;
+    }
     searchJobs({ query: "", location: undefined })
       .then((out) => {
         if (out.searched === 0) {

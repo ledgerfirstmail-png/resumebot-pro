@@ -171,6 +171,9 @@ const schema = defineSchema(
       postedAt: v.optional(v.number()),
       // Deterministic 0–100 fit vs the profile at search time.
       score: v.number(),
+      // When this row was last fetched + scored — drives the radar's
+      // stale-refresh so parser/scoring fixes reach stored listings.
+      scoredAt: v.optional(v.number()),
       matchedKeywords: v.array(v.string()),
       missingKeywords: v.array(v.string()),
       // new → tailored (AI reworked the resume for it) → applied →
