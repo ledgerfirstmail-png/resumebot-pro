@@ -8,6 +8,7 @@ import {
   Briefcase,
   ChevronLeft,
   ChevronRight,
+  Link2,
   Loader2,
   Plus,
   Sparkles,
@@ -201,8 +202,11 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
   });
   const [isGenerating, setIsGenerating] = useState(false);
   const [skillDraft, setSkillDraft] = useState("");
+  const [urlDraft, setUrlDraft] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
   const saveProfile = useMutation(api.resumes.saveProfile);
   const tailorResume = useAction(api.ai.tailorResume);
+  const extractJobPosting = useAction(api.ai.extractJobPosting);
 
   const profileForm = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
@@ -281,6 +285,41 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
       current.filter((s) => s !== skill),
       { shouldDirty: true },
     );
+  };
+
+  /** Import a posting from its URL instead of pasting the text (B2). */
+  const handleImportUrl = async () => {
+    const url = urlDraft.trim();
+    if (!/^https?:\/\/\S/i.test(url)) {
+      toast.error("Paste a full job posting URL, starting with https://");
+      return;
+    }
+    setIsImporting(true);
+    try {
+      const extracted = await extractJobPosting({
+        url,
+        sessionId: getSessionId(),
+      });
+      jobForm.setValue("jobTitle", extracted.jobTitle, { shouldDirty: true });
+      jobForm.setValue("companyName", extracted.companyName, {
+        shouldDirty: true,
+      });
+      jobForm.setValue("jobDescription", extracted.jobDescription, {
+        shouldDirty: true,
+      });
+      setUrlDraft("");
+      toast.success(
+        `Imported “${extracted.jobTitle}” — give it a quick read before generating.`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't import that posting — paste the text instead.",
+      );
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const handleGenerate = async (job: JobFormValues) => {
@@ -754,6 +793,49 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
             onSubmit={jobForm.handleSubmit(handleGenerate)}
             className="flex flex-col gap-5"
           >
+            {/* Import the posting from its URL instead of pasting */}
+            <div className="clay-inset flex flex-col gap-2 rounded-3xl p-4">
+              <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Import from a URL{" "}
+                <span className="ml-2 font-normal normal-case tracking-normal">
+                  paste the link — we'll pull the posting in
+                </span>
+              </span>
+              <div className="flex gap-2">
+                <input
+                  className={FIELD_INPUT}
+                  type="url"
+                  inputMode="url"
+                  aria-label="Job posting URL"
+                  placeholder="https://jobs.example.com/senior-product-designer"
+                  value={urlDraft}
+                  onChange={(e) => setUrlDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleImportUrl();
+                    }
+                  }}
+                />
+                <ClayButton
+                  variant="soft"
+                  onClick={() => void handleImportUrl()}
+                  disabled={isImporting}
+                >
+                  {isImporting ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Link2 />
+                  )}
+                  {isImporting ? "Importing…" : "Import"}
+                </ClayButton>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Works with most job boards (Greenhouse, Lever, Ashby…). Some
+                sites block readers — if import fails, paste the posting text.
+                Imports count toward your daily AI runs.
+              </p>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <ClayField
                 label="Job title"

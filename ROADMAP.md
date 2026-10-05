@@ -2,8 +2,9 @@
 
 Status date: 2026-10-05. Latest verification: Convex push `exit 0`,
 `tsc -b --noEmit` `exit 0`, `bun run lint` `exit 0` (0 errors, 17 pre-existing
-warnings), live AI smoke tests (`ai:tailorResume` → `score: 90`,
-`ai:generateApplicationKit` → 4 grounded answers).
+warnings), live AI smoke tests (`ai:tailorResume` → `score: 95`,
+`ai:generateApplicationKit` → 4 grounded answers, `ai:extractJobPosting` →
+real Greenhouse posting extracted + friendly failure on a non-job page).
 
 ## Resolved in the second pass (2026-10-05)
 
@@ -74,9 +75,34 @@ warnings), live AI smoke tests (`ai:tailorResume` → `score: 90`,
   `<MotionConfig reducedMotion="user">`, so every framer-motion animation
   (and anything reading motion config) honors `prefers-reduced-motion`.
 
-Still open: B2, B5, B6, C7, C8 (documented in README), D1, D2, D4, D5, D6,
-and E-list items 3, 4, 5, 7 (usage dashboard surface), 9 (C6 a11y remainder),
-10, 11, 12.
+Still open: B2's board-feed/saved-job-list half, B5, B6, C7, C8 (documented
+in README), D1, D2, D4, D5, and E-list items 3 (pipeline tracker), 4, 5,
+7 (usage dashboard surface), 9 (C6 a11y remainder), 10, 11, 12.
+
+## Resolved in the fifth pass (2026-10-05)
+
+- **B2 (partial) ✅ — job posting URL import**: new `ai:extractJobPosting`
+  action fetches the posting page (10s timeout, body streamed and capped at
+  600KB, basic SSRF guard rejecting private/localhost and non-http targets),
+  strips HTML to readable text, and has the AI pull out job title / company /
+  full posting (≤20k chars, shared retry loop). The wizard's job step gained
+  an **Import from a URL** field that autofills all three fields, with
+  friendly errors when a site blocks readers or the page isn't a single
+  posting. Still open from B2: board feeds and the saved job list / pipeline.
+- **D6 ✅ — structured AI run logging**: new `aiRuns` table records every AI
+  run — kind (`tailor`/`kit`/`extract`), success flag, failure reason, score,
+  tokens in/out, credits when reported, and duration. All three actions log
+  through `aiUsage.logRun`, which never throws (logging can't mask the real
+  result); inspect with `bunx convex run aiUsage:recentRuns`. While wiring
+  this, the duplicated budget + retry logic in the two existing actions was
+  consolidated into shared `enforceDailyBudget` and `completeToJson`
+  helpers, so all three actions behave identically.
+
+Live-verified this pass: extract failure path (non-job page → friendly error,
+logged with reason), extract success path (real Greenhouse posting →
+title/company/posting, logged with 1464/815 tokens), SSRF guards (localhost
+and `ftp:` rejected *before* any budget consumption), and the refactored
+`ai:tailorResume` end-to-end (→ `score: 95`, logged with tokens/duration).
 
 
 ---

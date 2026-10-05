@@ -26,6 +26,14 @@ export const scoreLabelValidator = v.union(
 );
 export type ScoreLabel = Infer<typeof scoreLabelValidator>;
 
+// AI operations tracked in the structured run log (see aiUsage.logRun).
+export const aiRunKindValidator = v.union(
+  v.literal("tailor"),
+  v.literal("kit"),
+  v.literal("extract"),
+);
+export type AiRunKind = Infer<typeof aiRunKindValidator>;
+
 const experienceValidator = v.object({
   company: v.string(),
   title: v.string(),
@@ -118,6 +126,25 @@ const schema = defineSchema(
       count: v.number(),
       createdAt: v.number(),
     }).index("by_session_day", ["sessionId", "day"]),
+
+    // Structured log of AI runs: outcome, failure reason, token/credit usage,
+    // and duration — so failures are visible without digging through client
+    // console output (ROADMAP D6).
+    aiRuns: defineTable({
+      sessionId: v.string(),
+      kind: aiRunKindValidator,
+      ok: v.boolean(),
+      // Failure reason, capped in logRun before insert.
+      error: v.optional(v.string()),
+      // Tailor runs only: the match score that was produced.
+      score: v.optional(v.number()),
+      // Token usage + credits billed for the run, when the provider reports it.
+      tokensIn: v.optional(v.number()),
+      tokensOut: v.optional(v.number()),
+      credits: v.optional(v.number()),
+      durationMs: v.optional(v.number()),
+      createdAt: v.number(),
+    }).index("by_kind", ["kind"]),
   },
   {
     schemaValidation: false,
