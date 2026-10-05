@@ -6,7 +6,10 @@ import tseslint from "typescript-eslint";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 
 export default tseslint.config(
-  { ignores: ["dist"] },
+  // `dist` is build output; `src/convex/_generated` is machine-generated
+  // (gitignored, recreated by `bunx convex codegen`) — linting it only ever
+  // reported "unused eslint-disable" noise (ROADMAP D4).
+  { ignores: ["dist", "src/convex/_generated/**"] },
   {
     extends: [
       js.configs.recommended,
@@ -28,6 +31,15 @@ export default tseslint.config(
         "warn",
         { allowConstantExport: true },
       ],
+    },
+  },
+  {
+    // shadcn/ui building blocks export cva variant maps alongside their
+    // components by design, and the Vly toolbar is a platform-owned file —
+    // the fast-refresh rule only makes noise there. It stays on for app code.
+    files: ["src/components/ui/**", "vly-toolbar-readonly.tsx"],
+    rules: {
+      "react-refresh/only-export-components": "off",
     },
   },
 );

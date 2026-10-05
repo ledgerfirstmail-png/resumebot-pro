@@ -167,9 +167,21 @@ sign-up, and session management UI (change password from settings).
   `src/convex/_generated` is gitignored; verified it exits 0 without Convex
   authentication (empty `HOME`, no deployment env vars). Lint is safe as a
   gate: it exits 0 today (0 errors, 17 pre-existing warnings).
+- **D4 ✅ — lint warnings (17 → 0)**: fixed at the cause rather than
+  suppressed globally. The four `src/convex/_generated/**` "unused
+  eslint-disable" warnings came from linting machine-generated code — that
+  directory is now in the eslint ignores (it's gitignored and recreated by
+  codegen). The two `main.tsx` warnings were real (route helper components
+  defined in a file with no exports): `RouteLoading` and `RouteSyncer` moved
+  to `src/components/RouteSupport.tsx`. The remaining 11
+  `react-refresh/only-export-components` warnings are inherent to files the
+  rule mis-fires on — shadcn/ui building blocks (cva variant maps exported
+  beside components, by shadcn design) and the platform-owned
+  `vly-toolbar-readonly.tsx` — so the rule is scoped off for exactly those
+  paths and stays on everywhere else in app code. The lint script now runs
+  `eslint . --max-warnings=0`, so CI enforces warning-free stays fixed.
 
-Still open from the D-list: **D4** (17 lint warnings, mostly
-`react-refresh/only-export-components`) and **D5** (one production build —
+Still open from the D-list: **D5** (one production build —
 kept off by the platform rule against `bun run build`).
 
 ## Resolved in the eighth pass (2026-10-05) — Job Radar
