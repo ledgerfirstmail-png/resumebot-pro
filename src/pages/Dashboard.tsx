@@ -1,5 +1,5 @@
 import { api } from "@/convex/_generated/api";
-import type { Id } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import type { TailorResult } from "@/convex/ai";
 import { AppHeader } from "@/components/clay/AppHeader";
 import { ClayButton } from "@/components/clay/ClayButton";
@@ -11,18 +11,15 @@ import {
   SavedResumeCard,
   SavedResumesEmptyState,
 } from "@/components/clay/SavedResumeCard";
-import { useAuth } from "@/hooks/use-auth";
-import type { Doc } from "@/convex/_generated/dataModel";
-import type { ResumeProfileData } from "@/types/resume";
 import { useMutation, useQuery } from "convex/react";
 import { FilePlus2, Loader2, Wand2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import type { ResumeProfileData } from "@/types/resume";
 
 type SavedResume = Doc<"tailoredResumes">;
 
 export default function Dashboard() {
-  const { user, isLoading: authLoading } = useAuth();
   const profile = useQuery(api.resumes.getProfile);
   const resumes = useQuery(api.resumes.listResumes);
   const saveResume = useMutation(api.resumes.saveResume);
@@ -137,7 +134,7 @@ export default function Dashboard() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  if (authLoading) {
+  if (profile === undefined) {
     return (
       <main className="clay-bg flex min-h-screen items-center justify-center">
         <Loader2 className="size-8 animate-spin text-primary" />
@@ -159,9 +156,9 @@ export default function Dashboard() {
         education: profile.education,
       }
     : {
-        fullName: user?.name ?? "",
+        fullName: "",
         title: "",
-        email: user?.email ?? "",
+        email: "",
         phone: "",
         location: "",
         portfolioUrl: "",

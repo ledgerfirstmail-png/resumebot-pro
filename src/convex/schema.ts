@@ -59,7 +59,6 @@ const schema = defineSchema(
     // The user's master resume profile — contact info, skills, experience, education.
     // One per user; upserted by the wizard before tailoring.
     resumeProfiles: defineTable({
-      userId: v.id("users"),
       fullName: v.string(),
       title: v.string(),
       email: v.string(),
@@ -71,13 +70,12 @@ const schema = defineSchema(
       experience: v.array(experienceValidator),
       education: v.array(educationValidator),
       updatedAt: v.number(),
-    }).index("by_user", ["userId"]),
+    }),
 
     // A tailored resume generated for one job posting, with its match score
     // and per-category breakdown so the workspace can show progress without
     // re-running the AI.
     tailoredResumes: defineTable({
-      userId: v.id("users"),
       profileId: v.id("resumeProfiles"),
       companyName: v.string(),
       jobTitle: v.string(),
@@ -97,9 +95,7 @@ const schema = defineSchema(
         }),
       ),
       createdAt: v.number(),
-    })
-      .index("by_user", ["userId"])
-      .index("by_profile", ["profileId"]),
+    }).index("by_profile", ["profileId"]),
   },
   {
     schemaValidation: false,

@@ -1,7 +1,6 @@
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { TailorResult } from "@/convex/ai";
-import { useAuth } from "@/hooks/use-auth";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useAction, useMutation } from "convex/react";
 import { motion } from "framer-motion";
@@ -115,14 +114,11 @@ function ClayField({
   );
 }
 
-function profileToFormValues(
-  profile: ResumeProfileData,
-  fallbackEmail = "",
-): ProfileFormValues {
+function profileToFormValues(profile: ResumeProfileData): ProfileFormValues {
   return {
     fullName: profile.fullName,
     title: profile.title,
-    email: profile.email || fallbackEmail,
+    email: profile.email,
     phone: profile.phone,
     location: profile.location,
     portfolioUrl: profile.portfolioUrl,
@@ -153,7 +149,6 @@ const EMPTY_FORM: ProfileFormValues = {
 };
 
 export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps) {
-  const { user } = useAuth();
   const [step, setStep] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [skillDraft, setSkillDraft] = useState("");
@@ -163,8 +158,8 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
   const profileForm = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
     defaultValues: initialProfile
-      ? profileToFormValues(initialProfile, user?.email ?? "")
-      : { ...EMPTY_FORM, email: user?.email ?? "" },
+      ? profileToFormValues(initialProfile)
+      : EMPTY_FORM,
   });
   const experienceArray = useFieldArray({
     control: profileForm.control,

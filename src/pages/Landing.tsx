@@ -80,7 +80,7 @@ const FEATURES = [
 export default function Landing() {
   const navigate = useNavigate();
 
-  const handleGetStarted = () => navigate("/auth");
+  const handleGetStarted = () => navigate("/dashboard");
 
   return (
     <div className="clay-bg min-h-screen">
@@ -94,7 +94,7 @@ export default function Landing() {
             <span className="clay-title text-xl">Tailorly</span>
           </div>
           <ClayButton variant="soft" onClick={handleGetStarted}>
-            Sign in <ArrowRight />
+            Open studio <ArrowRight />
           </ClayButton>
         </div>
       </header>

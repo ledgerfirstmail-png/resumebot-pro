@@ -1,4 +1,3 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { scoreLabelValidator } from "./schema";
@@ -30,17 +29,14 @@ const profileValidator = v.object({
   education: v.array(educationValidator),
 });
 
-/** Upsert the signed-in user's single master resume profile. */
+/** Upsert the (single) master resume profile. */
 export const saveProfile = mutation({
   args: { profile: profileValidator },
   handler: async (ctx, { profile }) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) throw new Error("Must be signed in");
-
     const existing = await ctx.db
       .query("resumeProfiles")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .unique();
+      .order("desc")
+      .first();
 
     if (existing) {
       await ctx.db.patch(existing._id, { ...profile, updatedAt: Date.now() });
@@ -48,48 +44,33 @@ export const saveProfile = mutation({
     }
 
     return await ctx.db.insert("resumeProfiles", {
-      userId,
       ...profile,
       updatedAt: Date.now(),
     });
   },
 });
 
-/** The signed-in user's master resume profile, or null if they haven't built one. */
+/** The master resume profile, or null if it hasn't been built yet. */
 export const getProfile = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) return null;
-    return await ctx.db
-      .query("resumeProfiles")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .unique();
+    return await ctx.db.query("resumeProfiles").order("desc").first();
   },
 });
 
-/** The signed-in user's tailored resumes, newest first. */
+/** All tailored resumes, newest first. */
 export const listResumes = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) return [];
-    return await ctx.db
-      .query("tailoredResumes")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .order("desc")
-      .collect();
+    return await ctx.db.query("tailoredResumes").order("desc").collect();
   },
 });
 
 export const deleteResume = mutation({
   args: { resumeId: v.id("tailoredResumes") },
   handler: async (ctx, { resumeId }) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) throw new Error("Must be signed in");
     const resume = await ctx.db.get(resumeId);
     if (!resume) throw new Error("Resume not found");
-    if (resume.userId !== userId) throw new Error("Not your resume");
     await ctx.db.delete(resumeId);
   },
 });
@@ -103,7 +84,7 @@ const breakdownValidator = v.array(
   }),
 );
 
-/** Persist a freshly tailored resume into the user's saved collection. */
+/** Persist a freshly tailored resume into the saved collection. */
 export const saveResume = mutation({
   args: {
     profileId: v.id("resumeProfiles"),
@@ -119,15 +100,10 @@ export const saveResume = mutation({
     breakdown: breakdownValidator,
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) throw new Error("Must be signed in");
     const profile = await ctx.db.get(args.profileId);
-    if (!profile || profile.userId !== userId) {
-      throw new Error("Profile not found");
-    }
+    if (!profile) throw new Error("Profile not found");
     return await ctx.db.insert("tailoredResumes", {
       ...args,
-      userId,
       createdAt: Date.now(),
     });
   },
