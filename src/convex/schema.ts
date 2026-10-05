@@ -98,6 +98,16 @@ const schema = defineSchema(
       // High-value posting terms the tailored resume still doesn't cover —
       // drives the gap checklist and the "boost to 90" re-tailor.
       missingKeywords: v.optional(v.array(v.string())),
+      // Copy-ready application material generated for this job, if any.
+      applicationKit: v.optional(
+        v.object({
+          coverLetter: v.string(),
+          whyThisRole: v.string(),
+          answers: v.array(
+            v.object({ question: v.string(), answer: v.string() }),
+          ),
+        }),
+      ),
     }).index("by_profile", ["profileId"]),
 
     // One row per (session, day) counting AI tailoring calls, so the

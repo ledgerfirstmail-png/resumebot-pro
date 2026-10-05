@@ -1,6 +1,6 @@
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import type { TailorResult } from "@/convex/ai";
+import type { ApplicationKit, TailorResult } from "@/convex/ai";
 import { AppHeader } from "@/components/clay/AppHeader";
 import { ClayButton } from "@/components/clay/ClayButton";
 import { ClayCard } from "@/components/clay/ClayCard";
@@ -25,6 +25,7 @@ export default function Dashboard() {
   const resumes = useQuery(api.resumes.listResumes);
   const saveResume = useMutation(api.resumes.saveResume);
   const tailorResume = useAction(api.ai.tailorResume);
+  const generateKit = useAction(api.ai.generateApplicationKit);
 
   const [result, setResult] = useState<{
     jobTitle: string;
@@ -34,6 +35,8 @@ export default function Dashboard() {
   } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isBoosting, setIsBoosting] = useState(false);
+  const [kit, setKit] = useState<ApplicationKit | null>(null);
+  const [isKitLoading, setIsKitLoading] = useState(false);
   const [viewingSaved, setViewingSaved] = useState(false);
   const [toDelete, setToDelete] = useState<SavedResume | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -54,6 +57,7 @@ export default function Dashboard() {
     });
     setViewingSaved(false);
     setShowWizard(false);
+    setKit(null);
     toast.success(
       `Tailored resume ready — ${output.result.score}% match for ${output.job.companyName}!`,
     );
@@ -68,6 +72,7 @@ export default function Dashboard() {
     setIsSaving(true);
     try {
       await saveResume({
+        ...(kit ? { applicationKit: kit } : {}),
         profileId: profile._id,
         companyName: result.companyName,
         jobTitle: result.jobTitle,
@@ -81,10 +86,15 @@ export default function Dashboard() {
         missingKeywords: result.result.missingKeywords,
         breakdown: result.result.breakdown,
       });
-      toast.success("Resume saved to your collection.");
+      toast.success(
+        viewingSaved
+          ? "Saved copy updated."
+          : "Resume saved to your collection.",
+      );
       setResult(null);
       setViewingSaved(false);
       setShowWizard(false);
+      setKit(null);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Could not save the resume.",
@@ -112,6 +122,7 @@ export default function Dashboard() {
     });
     setViewingSaved(true);
     setShowWizard(false);
+    setKit(resume.applicationKit ?? null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -124,6 +135,7 @@ export default function Dashboard() {
         setResult(null);
         setViewingSaved(false);
       }
+      setKit(null);
       toast.success("Saved resume deleted.");
       setToDelete(null);
     } catch (error) {
@@ -139,6 +151,7 @@ export default function Dashboard() {
     setResult(null);
     setViewingSaved(false);
     setShowWizard(true);
+    setKit(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -210,6 +223,33 @@ export default function Dashboard() {
     }
   };
 
+  /** Generate the copy-ready application answers + cover letter for this job. */
+  const handleGenerateKit = async () => {
+    if (!result || !profile) return;
+    setIsKitLoading(true);
+    try {
+      const generated = await generateKit({
+        profileJson: JSON.stringify(contact),
+        jobTitle: result.jobTitle,
+        companyName: result.companyName,
+        jobDescription: result.jobDescription,
+        sessionId: getSessionId(),
+      });
+      setKit(generated);
+      toast.success(
+        "Application kit ready — cover letter, why-this-role, and form answers.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not generate the application kit.",
+      );
+    } finally {
+      setIsKitLoading(false);
+    }
+  };
+
   return (
     <div>
       <AppHeader />
@@ -243,6 +283,9 @@ export default function Dashboard() {
               onRefine={startNewTailoring}
               onBoost={handleBoost}
               isBoosting={isBoosting}
+              kit={kit}
+              onGenerateKit={handleGenerateKit}
+              isGeneratingKit={isKitLoading}
               isSaving={isSaving}
               viewingSaved={viewingSaved}
             />

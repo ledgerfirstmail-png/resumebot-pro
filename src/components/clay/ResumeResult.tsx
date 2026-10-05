@@ -1,8 +1,9 @@
-import type { TailorResult } from "@/convex/ai";
+import type { ApplicationKit, TailorResult } from "@/convex/ai";
 import {
   Check,
   Copy,
   FileText,
+  Loader2,
   Printer,
   RefreshCcw,
   Save,
@@ -27,6 +28,10 @@ export interface ResumeResultProps {
   /** Re-tailor feeding the gap checklist back into the prompt. */
   onBoost?: () => void;
   isBoosting?: boolean;
+  /** Generated copy-ready application material for this job, if any. */
+  kit?: ApplicationKit | null;
+  onGenerateKit?: () => void;
+  isGeneratingKit?: boolean;
   isSaving: boolean;
   /** True when showing an already-saved resume (hides the save action). */
   viewingSaved?: boolean;
@@ -43,10 +48,14 @@ export function ResumeResult({
   onRefine,
   onBoost,
   isBoosting = false,
+  kit = null,
+  onGenerateKit,
+  isGeneratingKit = false,
   isSaving,
   viewingSaved = false,
 }: ResumeResultProps) {
   const [copied, setCopied] = useState(false);
+  const [copiedKit, setCopiedKit] = useState(false);
 
   const resume: ResumeProfileData = {
     ...contact,
@@ -88,6 +97,21 @@ export function ResumeResult({
 
   const handlePrint = () => window.print();
 
+  const handleCopyKit = async () => {
+    if (!kit) return;
+    const parts = [
+      "COVER LETTER",
+      kit.coverLetter,
+      "",
+      "WHY ARE YOU INTERESTED IN THIS ROLE?",
+      kit.whyThisRole,
+      ...kit.answers.flatMap((a) => ["", a.question, a.answer]),
+    ];
+    await navigator.clipboard.writeText(parts.join("\n"));
+    setCopiedKit(true);
+    setTimeout(() => setCopiedKit(false), 2000);
+  };
+
   return (
     <div className="flex flex-col gap-6">
       {/* Header row */}
@@ -112,12 +136,14 @@ export function ResumeResult({
             <ClayButton onClick={handlePrint} variant="soft">
               <Printer /> Print / PDF
             </ClayButton>
-            {!viewingSaved && (
-              <ClayButton onClick={onSave} disabled={isSaving}>
-                {isSaving ? <RefreshCcw className="animate-spin" /> : <Save />}
-                {isSaving ? "Saving…" : "Save to collection"}
-              </ClayButton>
-            )}
+            <ClayButton onClick={onSave} disabled={isSaving}>
+              {isSaving ? <RefreshCcw className="animate-spin" /> : <Save />}
+              {isSaving
+                ? "Saving…"
+                : viewingSaved
+                  ? "Update saved copy"
+                  : "Save to collection"}
+            </ClayButton>
             <ClayButton onClick={onRefine} variant="ghost">
               <FileText /> New tailoring
             </ClayButton>
@@ -169,6 +195,75 @@ export function ResumeResult({
         </ClayCard>
       )}
 
+      {/* Application kit — the auto-fill half of the job hunt */}
+      {onGenerateKit && (
+        <ClayCard>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="clay-title text-lg">Application kit</h3>
+              <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">
+                The forms waiting after the resume — a cover letter, a “why
+                this role” answer, and the four questions application forms
+                almost always ask, written from your real profile.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {kit ? (
+                <>
+                  <ClayButton variant="soft" onClick={handleCopyKit}>
+                    {copiedKit ? <Check /> : <Copy />}
+                    {copiedKit ? "Copied!" : "Copy all"}
+                  </ClayButton>
+                  <ClayButton
+                    variant="ghost"
+                    onClick={onGenerateKit}
+                    disabled={isGeneratingKit}
+                  >
+                    {isGeneratingKit ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <RefreshCcw />
+                    )}
+                    {isGeneratingKit ? "Generating…" : "Regenerate"}
+                  </ClayButton>
+                </>
+              ) : (
+                <ClayButton
+                  onClick={onGenerateKit}
+                  disabled={isGeneratingKit}
+                >
+                  {isGeneratingKit ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Sparkles />
+                  )}
+                  {isGeneratingKit ? "Writing…" : "Generate application kit"}
+                </ClayButton>
+              )}
+            </div>
+          </div>
+
+          {isGeneratingKit && !kit && (
+            <p className="mt-4 text-sm text-muted-foreground">
+              Drafting your cover letter and answers — about 15–30 seconds.
+            </p>
+          )}
+
+          {kit && (
+            <div className="mt-5 flex flex-col gap-4">
+              <KitBlock label="Cover letter" text={kit.coverLetter} />
+              <KitBlock
+                label="Why are you interested in this role?"
+                text={kit.whyThisRole}
+              />
+              {kit.answers.map((a) => (
+                <KitBlock key={a.question} label={a.question} text={a.answer} />
+              ))}
+            </div>
+          )}
+        </ClayCard>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
         {/* Score breakdown */}
         <ClayCard>
@@ -212,6 +307,34 @@ export function ResumeResult({
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One copy-ready block of application text with its own copy button. */
+function KitBlock({ label, text }: { label: string; text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (!text) return null;
+
+  return (
+    <div className="clay-inset rounded-3xl p-4">
+      <div className="flex items-start justify-between gap-3">
+        <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+          {label}
+        </span>
+        <ClayButton variant="ghost" size="sm" onClick={handleCopy}>
+          {copied ? <Check /> : <Copy />}
+          {copied ? "Copied" : "Copy"}
+        </ClayButton>
+      </div>
+      <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{text}</p>
     </div>
   );
 }

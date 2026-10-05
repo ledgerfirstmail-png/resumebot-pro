@@ -84,6 +84,12 @@ const breakdownValidator = v.array(
   }),
 );
 
+const applicationKitValidator = v.object({
+  coverLetter: v.string(),
+  whyThisRole: v.string(),
+  answers: v.array(v.object({ question: v.string(), answer: v.string() })),
+});
+
 /** Persist a freshly tailored resume into the saved collection. */
 export const saveResume = mutation({
   args: {
@@ -98,14 +104,19 @@ export const saveResume = mutation({
     education: v.array(educationValidator),
     keywords: v.array(v.string()),
     missingKeywords: v.optional(v.array(v.string())),
+    applicationKit: v.optional(applicationKitValidator),
     breakdown: breakdownValidator,
   },
   handler: async (ctx, args) => {
     const profile = await ctx.db.get(args.profileId);
     if (!profile) throw new Error("Profile not found");
 
-    const { missingKeywords, ...rest } = args;
-    const doc = { ...rest, missingKeywords: missingKeywords ?? [] };
+    const { missingKeywords, applicationKit, ...rest } = args;
+    const doc = {
+      ...rest,
+      missingKeywords: missingKeywords ?? [],
+      ...(applicationKit ? { applicationKit } : {}),
+    };
 
     // De-duplicate: re-saving the same job replaces the previous version
     // instead of stacking near-identical cards.

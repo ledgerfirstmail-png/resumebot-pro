@@ -29,7 +29,28 @@ errors remain), live AI smoke test (`ai:tailorResume` → `score: 90`).
 - **C6 (partial) ✅** — score gauge has `role="img"` + aria-label, wizard steps
   use `aria-current="step"`.
 
-Still open: B1, B2, B5–B8, C4, C5, C7, C8 (documented in README), D1–D7, E-list.
+## Resolved in the third pass (2026-10-05)
+
+- **B1 ✅ / E1 — Application auto-fill kit**: new `ai:generateApplicationKit`
+  action (same honesty rules, same daily budget, same retry/caps) returns a
+  cover letter, a "why this role" answer, and answers to the four questions
+  application forms always ask. Rendered on the result view with per-block
+  Copy buttons + Copy all; persisted on the saved resume
+  (`applicationKit` field) so saved views can regenerate/update too — the save
+  button now reads "Update saved copy" while viewing a saved resume, relying
+  on the A7 upsert.
+- **D3 ✅ — `bun run lint` exits 0** (first time): fixed the three template
+  errors at the root — `carousel.tsx` now reads scroll state through
+  `useSyncExternalStore` instead of setState-in-effect (and no longer leaks its
+  `reInit` listener), `sidebar.tsx` skeleton width derives from `useId()`
+  instead of `Math.random()` in render (pure + stable across re-renders), and
+  `use-mobile.ts` seeds its value in the state initializer and only subscribes
+  in the effect. Behavior improved, nothing suppressed.
+- Verified live: kit generation returned the 4 exact questions with
+  profile-grounded answers, and the shared budget counter incremented (2 → 3).
+
+Still open: B2, B5–B8, C4, C5, C7, C8 (documented in README), D1, D2, D4–D7,
+and the rest of E-list (items 2–12; item 1 done).
 
 
 ---

@@ -29,7 +29,7 @@ All relevant files live in the 'src' directory.
 Use bun for the package manager.
 
 Key source files:
-- `src/convex/ai.ts` — the tailoring action (rate-limited, input-capped, one retry)
+- `src/convex/ai.ts` — tailoring + application-kit actions (rate-limited, input-capped, one retry)
 - `src/convex/aiUsage.ts` — daily per-session AI budget
 - `src/convex/resumes.ts` — profile upsert + saved resumes (de-duplicating save)
 - `src/components/clay/ResumeWizard.tsx` — the wizard (drafts autosave to localStorage)
