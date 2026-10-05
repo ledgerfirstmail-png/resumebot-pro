@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import type { ResumeProfileData } from "@/types/resume";
+import { BeforeAfterDiff } from "./BeforeAfterDiff";
 import { ClayButton } from "./ClayButton";
 import { ClayCard } from "./ClayCard";
 import { ResumeDocument } from "./ResumeDocument";
@@ -194,6 +195,9 @@ export function ResumeResult({
           </ul>
         </ClayCard>
       )}
+
+      {/* Before vs. after — prove the rewrite is honest */}
+      <BeforeAfterDiff original={contact} tailored={result} />
 
       {/* Application kit — the auto-fill half of the job hunt */}
       {onGenerateKit && (

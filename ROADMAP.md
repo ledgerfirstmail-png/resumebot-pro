@@ -1,8 +1,9 @@
 # Tailorly — Audit: Missing, Updates & Upgrades
 
-Status date: 2026-10-05. Verified this session: Convex push `exit 0`,
-`tsc -b --noEmit` `exit 0`, lint (my files clean; 3 pre-existing template
-errors remain), live AI smoke test (`ai:tailorResume` → `score: 90`).
+Status date: 2026-10-05. Latest verification: Convex push `exit 0`,
+`tsc -b --noEmit` `exit 0`, `bun run lint` `exit 0` (0 errors, 17 pre-existing
+warnings), live AI smoke tests (`ai:tailorResume` → `score: 90`,
+`ai:generateApplicationKit` → 4 grounded answers).
 
 ## Resolved in the second pass (2026-10-05)
 
@@ -49,8 +50,33 @@ errors remain), live AI smoke test (`ai:tailorResume` → `score: 90`).
 - Verified live: kit generation returned the 4 exact questions with
   profile-grounded answers, and the shared budget counter incremented (2 → 3).
 
-Still open: B2, B5–B8, C4, C5, C7, C8 (documented in README), D1, D2, D4–D7,
-and the rest of E-list (items 2–12; item 1 done).
+## Resolved in the fourth pass (2026-10-05)
+
+- **B7 ✅ — score trend chart**: `ScoreTrend` (recharts, already installed)
+  plots every saved resume's score over time on the studio home, with an
+  average chip and an `role="img"` aria-label summarizing the series. Colors
+  flow through `currentColor` so the chart follows the clay palette + dark
+  mode automatically.
+- **B8 ✅ — before/after comparison**: `BeforeAfterDiff` matches original
+  experience entries to the tailored ones (company+title, positional
+  fallback) and shows each rewrite side by side — original bullet ("Yours")
+  vs tailored bullet, plus summary rewords and skills added/set-aside chips.
+  Collapsed by default on the result view; renders nothing when the tailoring
+  changed nothing. This makes the "honest by design" claim verifiable.
+- **D7 ✅ — per-section error boundary**: `SectionBoundary` wraps the wizard
+  and result views independently, so if one throws, the studio (header, saved
+  collection, navigation) stays usable and the failed section offers a retry.
+- **C4 ✅ — dark mode toggle**: `useTheme` keeps `.dark` on `<html>`, persists
+  to `localStorage` (`tailorly_theme`), and `applyStoredTheme()` runs before
+  first paint in `main.tsx` so a stored dark preference never flashes light.
+  Moon/Sun toggle added to the app header (aria-label + title).
+- **C5 ✅ — reduced motion respected**: the whole app is wrapped in
+  `<MotionConfig reducedMotion="user">`, so every framer-motion animation
+  (and anything reading motion config) honors `prefers-reduced-motion`.
+
+Still open: B2, B5, B6, C7, C8 (documented in README), D1, D2, D4, D5, D6,
+and E-list items 3, 4, 5, 7 (usage dashboard surface), 9 (C6 a11y remainder),
+10, 11, 12.
 
 
 ---

@@ -7,6 +7,8 @@ import { ClayCard } from "@/components/clay/ClayCard";
 import { ConfirmationModal } from "@/components/clay/ConfirmationModal";
 import { ResumeResult } from "@/components/clay/ResumeResult";
 import { ResumeWizard } from "@/components/clay/ResumeWizard";
+import { ScoreTrend } from "@/components/clay/ScoreTrend";
+import { SectionBoundary } from "@/components/clay/SectionBoundary";
 import {
   SavedResumeCard,
   SavedResumesEmptyState,
@@ -273,28 +275,32 @@ export default function Dashboard() {
 
           {/* Result (after generation) */}
           {result ? (
-            <ResumeResult
-              jobTitle={result.jobTitle}
-              companyName={result.companyName}
-              jobDescription={result.jobDescription}
-              result={result.result}
-              contact={contact}
-              onSave={handleSave}
-              onRefine={startNewTailoring}
-              onBoost={handleBoost}
-              isBoosting={isBoosting}
-              kit={kit}
-              onGenerateKit={handleGenerateKit}
-              isGeneratingKit={isKitLoading}
-              isSaving={isSaving}
-              viewingSaved={viewingSaved}
-            />
+            <SectionBoundary key="result-section">
+              <ResumeResult
+                jobTitle={result.jobTitle}
+                companyName={result.companyName}
+                jobDescription={result.jobDescription}
+                result={result.result}
+                contact={contact}
+                onSave={handleSave}
+                onRefine={startNewTailoring}
+                onBoost={handleBoost}
+                isBoosting={isBoosting}
+                kit={kit}
+                onGenerateKit={handleGenerateKit}
+                isGeneratingKit={isKitLoading}
+                isSaving={isSaving}
+                viewingSaved={viewingSaved}
+              />
+            </SectionBoundary>
           ) : showWizard ? (
             /* Wizard */
-            <ResumeWizard
-              initialProfile={profile ?? null}
-              onGenerated={handleGenerated}
-            />
+            <SectionBoundary key="wizard-section">
+              <ResumeWizard
+                initialProfile={profile ?? null}
+                onGenerated={handleGenerated}
+              />
+            </SectionBoundary>
           ) : (
             /* Default workspace state */
             <div className="flex flex-col gap-6">
@@ -342,7 +348,42 @@ export default function Dashboard() {
                 ) : resumes.length === 0 ? (
                   <SavedResumesEmptyState />
                 ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <>
+                    {/* Score history — progress toward the 90% goal */}
+                    {resumes.length >= 2 && (
+                      <ClayCard>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <h3 className="clay-title text-lg">
+                              Your match trend
+                            </h3>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Every saved resume scored against its own posting
+                              — watch the climb toward 90%.
+                            </p>
+                          </div>
+                          <span className="clay-chip px-3 py-1 text-xs font-bold">
+                            avg{" "}
+                            {Math.round(
+                              resumes.reduce((sum, r) => sum + r.score, 0) /
+                                resumes.length,
+                            )}
+                            %
+                          </span>
+                        </div>
+                        <div className="mt-4">
+                          <ScoreTrend
+                            points={resumes.map((resume) => ({
+                              createdAt: resume._creationTime,
+                              score: resume.score,
+                              jobTitle: resume.jobTitle,
+                              companyName: resume.companyName,
+                            }))}
+                          />
+                        </div>
+                      </ClayCard>
+                    )}
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {resumes.map((resume) => (
                       <SavedResumeCard
                         key={resume._id}
@@ -351,7 +392,8 @@ export default function Dashboard() {
                         onDelete={() => setToDelete(resume)}
                       />
                     ))}
-                  </div>
+                    </div>
+                  </>
                 )}
               </section>
             </div>
