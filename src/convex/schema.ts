@@ -65,8 +65,10 @@ const schema = defineSchema(
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
     // The user's master resume profile — contact info, skills, experience, education.
-    // One per user; upserted by the wizard before tailoring.
+    // One per signed-in user; upserted by the wizard before tailoring.
     resumeProfiles: defineTable({
+      // Owner (absent only on legacy pre-login docs).
+      userId: v.optional(v.id("users")),
       fullName: v.string(),
       title: v.string(),
       email: v.string(),
@@ -78,12 +80,14 @@ const schema = defineSchema(
       experience: v.array(experienceValidator),
       education: v.array(educationValidator),
       updatedAt: v.number(),
-    }),
+    }).index("by_user", ["userId"]),
 
     // A tailored resume generated for one job posting, with its match score
     // and per-category breakdown so the workspace can show progress without
     // re-running the AI.
     tailoredResumes: defineTable({
+      // Owner — keeps every saved resume private to its account.
+      userId: v.optional(v.id("users")),
       profileId: v.id("resumeProfiles"),
       companyName: v.string(),
       jobTitle: v.string(),
@@ -116,7 +120,9 @@ const schema = defineSchema(
           ),
         }),
       ),
-    }).index("by_profile", ["profileId"]),
+    })
+      .index("by_profile", ["profileId"])
+      .index("by_user", ["userId"]),
 
     // One row per (session, day) counting AI tailoring calls, so the
     // login-free tailorResume action has a hard daily budget.

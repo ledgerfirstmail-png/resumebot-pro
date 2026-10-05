@@ -104,6 +104,45 @@ title/company/posting, logged with 1464/815 tokens), SSRF guards (localhost
 and `ftp:` rejected *before* any budget consumption), and the refactored
 `ai:tailorResume` end-to-end (→ `score: 95`, logged with tokens/duration).
 
+## Resolved in the sixth pass (2026-10-05) — auth shipped
+
+- **Login (user name + password)**: new `/auth` page (sign in / create
+  account / forgot-password / enter-code modes, clay-themed) backed by a
+  ConvexAuth `ConvexCredentials` provider
+  (`src/convex/auth/usernamePassword.ts`) keyed by user name, Scrypt-hashed
+  (lucia). Wrong user name and wrong password return one message; the
+  library's built-in failed-attempt rate limit applies. `auth.ts` only gained
+  the provider in its `providers` array (its header explicitly permits
+  adding providers); `emailOtp.ts` / `auth.config.ts` / auth schema / the
+  `ConvexAuthProvider` wrapper are untouched.
+- **Sign up + email password reset**: sign-up captures user name + email +
+  password (both uniqueness-checked with friendly errors). Reset emails a
+  single-use, hashed, 15-minute 6-digit code via the template's existing
+  `auth.freebuff.app` transport (dedicated `password-reset` email provider —
+  the default email-match check is skipped because accounts are keyed by
+  user name; the code itself is the secret). Unknown emails get the same
+  response as known ones (no account enumeration); wrong/expired codes share
+  one message; a successful reset sets the new password, signs the user in,
+  and invalidates other sessions.
+- **Protected routes + per-user data**: `RequireAuth` preserves the intended
+  path (`/auth?returnTo=…`), the auth page returns to it after sign-in, and
+  every resume query/mutation in `resumes.ts` is now scoped by `userId`
+  (schema: `userId` + `by_user` indexes) — accounts actually isolate data.
+  Header shows the signed-in name + Sign out.
+
+Live-verified via `convex run` (full flows, real tokens returned): sign-up →
+session, sign-in → session, wrong password → friendly error, duplicate
+user name / duplicate email → friendly errors, reset request → code created
+(mail sender rejected the reserved `example.com` test domain with 500 →
+surfaced as a friendly client error + logged server-side), reset-verification
+with that code → password changed + signed in, old password rejected after,
+wrong code rejected, signed-out `getProfile` → null, signed-out
+`saveProfile` → "signed out" error.
+
+Still open from auth: verify reset-email **delivery** with a real inbox
+(platform mailer rejected example.com), optional email verification on
+sign-up, and session management UI (change password from settings).
+
 
 ---
 

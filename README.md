@@ -7,9 +7,11 @@ a one-click "boost toward 90" re-tailor. Styled with a Claymorphism theme.
 
 Routes:
 - `/` — landing page
-- `/dashboard` — the Resume Studio (3-step wizard → generator → result → saved
-  collection). **No login**: version 1 is deliberately a no-auth, single-user
-  workspace; `/auth` just redirects here.
+- `/auth` — sign in (user name + password), create account, and email-based
+  password reset
+- `/dashboard` — the Resume Studio (protected by `RequireAuth`): 3-step wizard
+  → generator → result → saved collection. Signed-out visitors are redirected
+  to `/auth?returnTo=/dashboard`.
 
 Tech stack:
 - Vite
@@ -29,9 +31,12 @@ All relevant files live in the 'src' directory.
 Use bun for the package manager.
 
 Key source files:
-- `src/convex/ai.ts` — tailoring + application-kit actions (rate-limited, input-capped, one retry)
-- `src/convex/aiUsage.ts` — daily per-session AI budget
-- `src/convex/resumes.ts` — profile upsert + saved resumes (de-duplicating save)
+- `src/convex/ai.ts` — tailoring + application-kit + job-URL import actions (rate-limited, input-capped, one retry)
+- `src/convex/aiUsage.ts` — daily per-session AI budget + structured AI run log
+- `src/convex/auth/usernamePassword.ts` — Tailorly's user name + password auth provider (sign up / sign in / email reset)
+- `src/convex/resumes.ts` — per-user profile upsert + saved resumes (de-duplicating save)
+- `src/pages/Auth.tsx` — sign in / create account / password reset page
+- `src/components/RequireAuth.tsx` — route guard (preserves `returnTo`)
 - `src/components/clay/ResumeWizard.tsx` — the wizard (drafts autosave to localStorage)
 - `src/components/clay/ResumeResult.tsx` — score, gap checklist, boost, job posting view
 - `ROADMAP.md` — audit of what's missing / next upgrades
@@ -49,23 +54,35 @@ The convex server has a separate set of environment variables that are accessibl
 Currently, these variables include auth-specific keys: JWKS, JWT_PRIVATE_KEY, and SITE_URL.
 
 
-# Authentication (shipped but inactive — v1 has no login)
+# Authentication
 
-Tailorly v1 is a **no-login, single-user workspace**. The template's Convex Auth
-plumbing still exists but is intentionally inert, because these files are marked
-do-not-modify:
+Tailorly ships **user name + password authentication** via Convex Auth:
 
-- `src/convex/auth.config.ts`, `src/convex/auth.ts`, `src/convex/auth/emailOtp.ts`
-- the `authTables` spread and `users` table in `src/convex/schema.ts`
-- `ConvexAuthProvider` wrapping the app in `src/main.tsx`
-- env keys `JWKS`, `JWT_PRIVATE_KEY`, `SITE_URL` on the Convex deployment
+- `/auth` (src/pages/Auth.tsx) has four modes: sign in (user name + password),
+  create account (user name + email + password), reset via email, and enter the
+  emailed 6-digit code + new password. On success it returns to `returnTo`
+  (default `/dashboard`).
+- `src/convex/auth/usernamePassword.ts` is a ConvexAuth `ConvexCredentials`
+  provider (the documented way to do username logins): accounts are keyed by
+  normalized user name, passwords hashed with lucia Scrypt, and password
+  resets reuse the template's `emailOtp` transport through a dedicated
+  `password-reset` email provider. Failed sign-ins are rate-limited by the
+  library; wrong user name and wrong password return the same message.
+- `src/convex/auth.ts` only gained the new provider in its `providers` array
+  (the file header explicitly allows adding providers). `emailOtp.ts`,
+  `auth.config.ts`, the `authTables`/`users` schema, and `ConvexAuthProvider`
+  in `main.tsx` are untouched.
+- `/dashboard` is wrapped in `RequireAuth` (src/components/RequireAuth.tsx),
+  which preserves the intended path as `/auth?returnTo=...`.
+- All resume data is **scoped per signed-in user** (`userId` on
+  `resumeProfiles`/`tailoredResumes`, enforced in `src/convex/resumes.ts`);
+  signed-out queries return null/[] and mutations throw.
+- The anonymous per-session AI budget in `src/convex/aiUsage.ts` (25 runs/day)
+  still applies on top of auth.
 
-What was removed and must NOT be reintroduced without asking: the `/auth` page
-(it now redirects to `/dashboard`), `RequireAuth`, and `hooks/use-auth`. All
-resume functions in `src/convex/resumes.ts` are deliberately unauthenticated.
-
-The only abuse protection is the anonymous per-session AI budget in
-`src/convex/aiUsage.ts` (25 tailoring runs/day/browser).
+Note: reset emails go through `auth.freebuff.app` (configured by the platform).
+That service rejected reserved test domains (`example.com`) with an HTTP 500,
+so verify delivery with a real inbox; failures surface as a friendly error.
 
 # Frontend Conventions
 

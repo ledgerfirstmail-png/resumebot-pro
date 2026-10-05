@@ -1,6 +1,9 @@
 import logo from "@/assets/logo.svg";
+import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/hooks/use-theme";
-import { Home, Moon, Sparkles, Sun } from "lucide-react";
+import { useAuthActions } from "@convex-dev/auth/react";
+import { useQuery } from "convex/react";
+import { Home, LogOut, Moon, Sun } from "lucide-react";
 import { useNavigate } from "react-router";
 import { ClayButton } from "./ClayButton";
 
@@ -8,6 +11,8 @@ import { ClayButton } from "./ClayButton";
 export function AppHeader() {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
+  const user = useQuery(api.users.currentUser);
+  const { signOut } = useAuthActions();
 
   return (
     <header className="sticky top-0 z-40 bg-background/70 backdrop-blur-md">
@@ -24,10 +29,14 @@ export function AppHeader() {
         </button>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          <span className="hidden items-center gap-1.5 rounded-full bg-card/80 px-3 py-1.5 text-xs font-semibold text-foreground/75 sm:inline-flex">
-            <Sparkles className="size-3.5 text-primary/70" />
-            Your private resume studio
-          </span>
+          {user && (
+            <span
+              className="hidden max-w-[12rem] items-center gap-1.5 truncate rounded-full bg-card/80 px-3 py-1.5 text-xs font-semibold text-foreground/75 sm:inline-flex"
+              title={user.email ?? undefined}
+            >
+              {user.name ?? user.email ?? "Signed in"}
+            </span>
+          )}
           <ClayButton
             variant="ghost"
             onClick={toggle}
@@ -37,6 +46,16 @@ export function AppHeader() {
             title={theme === "dark" ? "Light theme" : "Dark theme"}
           >
             {theme === "dark" ? <Sun /> : <Moon />}
+          </ClayButton>
+          <ClayButton
+            variant="ghost"
+            onClick={async () => {
+              await signOut();
+              navigate("/");
+            }}
+          >
+            <LogOut />
+            <span className="hidden sm:inline">Sign out</span>
           </ClayButton>
           <ClayButton variant="ghost" onClick={() => navigate("/")}>
             <Home />

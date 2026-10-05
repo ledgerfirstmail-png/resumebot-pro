@@ -1,6 +1,17 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { scoreLabelValidator } from "./schema";
+
+/** Every resume feature requires a signed-in account. */
+async function requireUserId(ctx: MutationCtx): Promise<Id<"users">> {
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) {
+    throw new Error("You're signed out — sign in to continue.");
+  }
+  return userId;
+}
 
 const experienceValidator = v.object({
   company: v.string(),
@@ -29,12 +40,14 @@ const profileValidator = v.object({
   education: v.array(educationValidator),
 });
 
-/** Upsert the (single) master resume profile. */
+/** Upsert the caller's master resume profile. */
 export const saveProfile = mutation({
   args: { profile: profileValidator },
   handler: async (ctx, { profile }) => {
+    const userId = await requireUserId(ctx);
     const existing = await ctx.db
       .query("resumeProfiles")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
       .order("desc")
       .first();
 
@@ -45,32 +58,47 @@ export const saveProfile = mutation({
 
     return await ctx.db.insert("resumeProfiles", {
       ...profile,
+      userId,
       updatedAt: Date.now(),
     });
   },
 });
 
-/** The master resume profile, or null if it hasn't been built yet. */
+/** The caller's master resume profile, or null if it hasn't been built yet. */
 export const getProfile = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("resumeProfiles").order("desc").first();
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    return await ctx.db
+      .query("resumeProfiles")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .first();
   },
 });
 
-/** All tailored resumes, newest first. */
+/** The caller's tailored resumes, newest first. */
 export const listResumes = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("tailoredResumes").order("desc").collect();
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    return await ctx.db
+      .query("tailoredResumes")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .collect();
   },
 });
 
 export const deleteResume = mutation({
   args: { resumeId: v.id("tailoredResumes") },
   handler: async (ctx, { resumeId }) => {
+    const userId = await requireUserId(ctx);
     const resume = await ctx.db.get(resumeId);
     if (!resume) throw new Error("Resume not found");
+    if (resume.userId !== userId) throw new Error("Resume not found");
     await ctx.db.delete(resumeId);
   },
 });
@@ -108,12 +136,16 @@ export const saveResume = mutation({
     breakdown: breakdownValidator,
   },
   handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx);
     const profile = await ctx.db.get(args.profileId);
-    if (!profile) throw new Error("Profile not found");
+    if (!profile || profile.userId !== userId) {
+      throw new Error("Profile not found");
+    }
 
     const { missingKeywords, applicationKit, ...rest } = args;
     const doc = {
       ...rest,
+      userId,
       missingKeywords: missingKeywords ?? [],
       ...(applicationKit ? { applicationKit } : {}),
     };
