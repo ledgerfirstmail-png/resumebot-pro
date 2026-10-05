@@ -1,11 +1,11 @@
 {
-  "name": "freebuff.com application",
-  "short_name": "freebuff.com",
-  "description": "freebuff.com application",
+  "name": "Tailorly — tailored resumes that score",
+  "short_name": "Tailorly",
+  "description": "Paste a job posting and get a tailored, scored resume that mirrors what businesses are looking for.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#000000",
+  "background_color": "#faf3ec",
+  "theme_color": "#faf3ec",
   "icons": [
     {
       "src": "/logo.svg",

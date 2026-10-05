@@ -11,10 +11,11 @@ import {
   SavedResumeCard,
   SavedResumesEmptyState,
 } from "@/components/clay/SavedResumeCard";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { FilePlus2, Loader2, Wand2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { getSessionId } from "@/lib/session";
 import type { ResumeProfileData } from "@/types/resume";
 
 type SavedResume = Doc<"tailoredResumes">;
@@ -23,6 +24,7 @@ export default function Dashboard() {
   const profile = useQuery(api.resumes.getProfile);
   const resumes = useQuery(api.resumes.listResumes);
   const saveResume = useMutation(api.resumes.saveResume);
+  const tailorResume = useAction(api.ai.tailorResume);
 
   const [result, setResult] = useState<{
     jobTitle: string;
@@ -31,6 +33,7 @@ export default function Dashboard() {
     result: TailorResult;
   } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isBoosting, setIsBoosting] = useState(false);
   const [viewingSaved, setViewingSaved] = useState(false);
   const [toDelete, setToDelete] = useState<SavedResume | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -75,6 +78,7 @@ export default function Dashboard() {
         experience: result.result.experience,
         education: result.result.education,
         keywords: result.result.keywords,
+        missingKeywords: result.result.missingKeywords,
         breakdown: result.result.breakdown,
       });
       toast.success("Resume saved to your collection.");
@@ -102,6 +106,7 @@ export default function Dashboard() {
         experience: resume.experience,
         education: resume.education,
         keywords: resume.keywords,
+        missingKeywords: resume.missingKeywords ?? [],
         breakdown: resume.breakdown,
       },
     });
@@ -171,6 +176,40 @@ export default function Dashboard() {
         education: [],
       };
 
+  /** Re-tailor with the gap checklist fed back into the prompt (boost to 90). */
+  const handleBoost = async () => {
+    if (!result || !profile) return;
+    if (result.result.missingKeywords.length === 0) return;
+    setIsBoosting(true);
+    try {
+      const updated = await tailorResume({
+        profileJson: JSON.stringify(contact),
+        jobTitle: result.jobTitle,
+        companyName: result.companyName,
+        jobDescription: result.jobDescription,
+        sessionId: getSessionId(),
+        boostKeywords: result.result.missingKeywords,
+      });
+      setResult({ ...result, result: updated });
+      setViewingSaved(false);
+      toast.success(
+        updated.score >= 90
+          ? `Boosted — now ${updated.score}% match. You're at the target.`
+          : `Boosted — now ${updated.score}% match.${
+              updated.missingKeywords.length > 0
+                ? ` ${updated.missingKeywords.length} gap(s) left.`
+                : ""
+            }`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Boost failed — try again.",
+      );
+    } finally {
+      setIsBoosting(false);
+    }
+  };
+
   return (
     <div>
       <AppHeader />
@@ -197,10 +236,13 @@ export default function Dashboard() {
             <ResumeResult
               jobTitle={result.jobTitle}
               companyName={result.companyName}
+              jobDescription={result.jobDescription}
               result={result.result}
               contact={contact}
               onSave={handleSave}
               onRefine={startNewTailoring}
+              onBoost={handleBoost}
+              isBoosting={isBoosting}
               isSaving={isSaving}
               viewingSaved={viewingSaved}
             />

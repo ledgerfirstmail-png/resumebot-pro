@@ -1,5 +1,9 @@
 /** Shared types for resume profiles and tailored resumes (mirrors the Convex schema). */
 
+// Single source of truth for score categories: the Convex schema validator.
+import type { ScoreLabel } from "@/convex/schema";
+export type { ScoreLabel };
+
 export interface ExperienceEntry {
   company: string;
   title: string;
@@ -13,13 +17,6 @@ export interface EducationEntry {
   degree: string;
   gradYear: string;
 }
-
-export type ScoreLabel =
-  | "Skills"
-  | "Experience"
-  | "Education"
-  | "Summary"
-  | "Formatting";
 
 export interface ScoreBreakdownEntry {
   label: ScoreLabel;

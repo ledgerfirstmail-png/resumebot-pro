@@ -2,6 +2,9 @@
 
 import { vly } from "../lib/vly-integrations";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
+import type { ScoreLabel } from "./schema";
+import { MAX_AI_CALLS_PER_DAY } from "./aiUsage";
 import { action } from "./_generated/server";
 
 export interface ExperienceEntry {
@@ -25,8 +28,10 @@ export interface TailorResult {
   experience: ExperienceEntry[];
   education: EducationEntry[];
   keywords: string[];
+  /** Posting terms the tailored resume still doesn't clearly cover. */
+  missingKeywords: string[];
   breakdown: Array<{
-    label: "Skills" | "Experience" | "Education" | "Summary" | "Formatting";
+    label: ScoreLabel;
     score: number;
     maxScore: number;
     note: string
@@ -35,6 +40,10 @@ export interface TailorResult {
 
 const scoreLabelUnion =
   "Skills | Experience | Education | Summary | Formatting";
+
+/** Input caps — a giant paste inflates the prompt and risks truncation. */
+const MAX_JOB_DESCRIPTION_CHARS = 20_000;
+const MAX_PROFILE_JSON_CHARS = 60_000;
 
 const SYSTEM_PROMPT = `You are an expert resume tailoring engine. You rework a candidate's resume so it scores as highly as possible against one job description, WITHOUT inventing experience the candidate doesn't have.
 
@@ -51,7 +60,12 @@ function buildUserPrompt(
   jobTitle: string,
   companyName: string,
   jobDescription: string,
+  boostKeywords: string[],
 ) {
+  const boostSection =
+    boostKeywords.length > 0
+      ? `\nBOOST PASS: These high-value terms from the posting were missing or weak in the previous version: ${boostKeywords.join(", ")}. Work each one into the summary, skills, or bullets ONLY where it truthfully describes the candidate's real experience. Never stuff a term the profile cannot support.`
+      : "";
   return `The candidate's master resume profile:
 <profile>
 ${profileJson}
@@ -82,6 +96,7 @@ Return a JSON object with EXACTLY this shape:
     { "school": "...", "degree": "...", "gradYear": "..." }
   ],
   "keywords": [<the job's most important keywords that the tailored resume now contains>],
+  "missingKeywords": [<up to 12 important terms from the job description that the tailored resume still does NOT clearly cover — empty array if none>],
   "breakdown": [
     { "label": "Skills", "score": <0-25>, "maxScore": 25, "note": "<one short sentence: what earns points and what loses them>" },
     { "label": "Experience", "score": <0-30>, "maxScore": 30, "note": "..." },
@@ -92,7 +107,7 @@ Return a JSON object with EXACTLY this shape:
 }
 
 Breakdown labels must be exactly: ${scoreLabelUnion}.
-"score" must equal the sum of the five breakdown scores.`;
+"score" must equal the sum of the five breakdown scores.${boostSection}`;
 }
 
 /** Tolerant JSON extraction — models sometimes wrap JSON in prose or fences. */
@@ -136,27 +151,71 @@ export const tailorResume = action({
     jobTitle: v.string(),
     companyName: v.string(),
     jobDescription: v.string(),
+    sessionId: v.string(),
+    boostKeywords: v.optional(v.array(v.string())),
   },
-  handler: async (_ctx, { profileJson, jobTitle, companyName, jobDescription }): Promise<TailorResult> => {
-    const completion = await vly.ai.completion({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: buildUserPrompt(profileJson, jobTitle, companyName, jobDescription),
-        },
-      ],
-      temperature: 0.4,
-      maxTokens: 3000,
+  handler: async (
+    ctx,
+    { profileJson, jobTitle, companyName, jobDescription, sessionId, boostKeywords },
+  ): Promise<TailorResult> => {
+    const jd = jobDescription.slice(0, MAX_JOB_DESCRIPTION_CHARS);
+    const pj = profileJson.slice(0, MAX_PROFILE_JSON_CHARS);
+    const boosts = (boostKeywords ?? [])
+      .map((k) => k.trim())
+      .filter(Boolean)
+      .slice(0, 20)
+      .map((k) => k.slice(0, 80));
+    const sid = sessionId.trim().slice(0, 64) || "anonymous";
+
+    // Daily per-session budget so the open, login-free endpoint can't be drained.
+    const day = new Date().toISOString().slice(0, 10);
+    const used = await ctx.runQuery(internal.aiUsage.getUsage, {
+      sessionId: sid,
+      day,
     });
-
-    if (!completion.success || !completion.data) {
-      throw new Error(completion.error ?? "The AI service is unavailable. Try again in a moment.");
+    if (used >= MAX_AI_CALLS_PER_DAY) {
+      throw new Error(
+        `Daily tailoring limit reached (${MAX_AI_CALLS_PER_DAY} runs per day). Your profile and saved resumes are untouched — try again tomorrow.`,
+      );
     }
+    await ctx.runMutation(internal.aiUsage.recordCall, { sessionId: sid, day });
 
-    const content = completion.data.choices[0]?.message?.content ?? "";
-    const parsed = extractJson(content) as Record<string, unknown>;
+    // One retry: models occasionally wrap, truncate, or babble instead of JSON.
+    let parsed: Record<string, unknown> | null = null;
+    let lastFailure = "unparsable response";
+    for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+      const completion = await vly.ai.completion({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: buildUserPrompt(pj, jobTitle, companyName, jd, boosts),
+          },
+        ],
+        temperature: 0.4,
+        maxTokens: 4000,
+      });
+
+      if (!completion.success || !completion.data) {
+        throw new Error(
+          completion.error ??
+            "The AI service is busy right now. Give it a few seconds and try again.",
+        );
+      }
+
+      const content = completion.data.choices[0]?.message?.content ?? "";
+      try {
+        parsed = extractJson(content) as Record<string, unknown>;
+      } catch (err) {
+        lastFailure = err instanceof Error ? err.message : lastFailure;
+      }
+    }
+    if (!parsed) {
+      throw new Error(
+        `The AI returned an unusable response (${lastFailure}). Try shortening the job posting or trimming a role, then generate again.`,
+      );
+    }
 
     const rawBreakdown = Array.isArray(parsed.breakdown) ? parsed.breakdown : [];
     const allowedLabels = ["Skills", "Experience", "Education", "Summary", "Formatting"] as const;
@@ -186,6 +245,12 @@ export const tailorResume = action({
       : [];
     const keywords = Array.isArray(parsed.keywords)
       ? parsed.keywords.filter((k): k is string => typeof k === "string" && k.trim().length > 0).map((k) => k.trim()).slice(0, 20)
+      : [];
+    const missingKeywords = Array.isArray(parsed.missingKeywords)
+      ? parsed.missingKeywords
+          .filter((k): k is string => typeof k === "string" && k.trim().length > 0)
+          .map((k) => k.trim())
+          .slice(0, 12)
       : [];
 
     const experience = Array.isArray(parsed.experience)
@@ -226,6 +291,7 @@ export const tailorResume = action({
       experience,
       education,
       keywords,
+      missingKeywords,
       breakdown,
     };
   },

@@ -82,6 +82,11 @@ export default function Landing() {
 
   const handleGetStarted = () => navigate("/dashboard");
 
+  const handleSeeHow = () =>
+    document
+      .getElementById("how-it-works")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+
   return (
     <div className="clay-bg min-h-screen">
       {/* Nav */}
@@ -140,11 +145,11 @@ export default function Landing() {
             <ClayButton size="lg" onClick={handleGetStarted}>
               <Wand2 /> Build my tailored resume
             </ClayButton>
-            <ClayButton variant="soft" size="lg" onClick={handleGetStarted}>
+            <ClayButton variant="soft" size="lg" onClick={handleSeeHow}>
               See how it works <ArrowRight />
             </ClayButton>
             <span className="text-xs font-semibold text-muted-foreground">
-              Free to try · no card needed
+              Free · runs in your browser
             </span>
           </motion.div>
 
@@ -207,7 +212,7 @@ export default function Landing() {
         </section>
 
         {/* How it works */}
-        <section className="pb-16">
+        <section id="how-it-works" className="scroll-mt-24 pb-16">
           <h2 className="clay-title mb-8 text-center text-3xl">
             Four soft steps, one sharp resume
           </h2>

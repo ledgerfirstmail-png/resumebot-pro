@@ -4,6 +4,34 @@ Status date: 2026-10-05. Verified this session: Convex push `exit 0`,
 `tsc -b --noEmit` `exit 0`, lint (my files clean; 3 pre-existing template
 errors remain), live AI smoke test (`ai:tailorResume` → `score: 90`).
 
+## Resolved in the second pass (2026-10-05)
+
+- **A1 ✅** — per-session daily budget (25 runs/day/browser) in `aiUsage.ts`,
+  checked *before* the AI call; verified live that it records counts and blocks
+  with a friendly error once the cap is hit.
+- **A2 ✅** — caps enforced client (zod) + server: job posting ≤ 20k chars,
+  profile JSON ≤ 60k, boost keywords bounded.
+- **A3 ✅** — one automatic retry on unparsable AI output, `maxTokens` 3000 →
+  4000, and actionable error messages instead of raw parser failures.
+- **A4 ✅** — wizard drafts autosave (debounced) to localStorage and restore on
+  refresh; cleared after a successful generation.
+- **A5 ✅** — the original job posting is shown collapsibly on the result view,
+  including for saved resumes.
+- **A7 ✅** — saving the same job title + company upserts instead of duplicating.
+- **A8 ✅** — `ScoreLabel` single-sourced from the schema validator; frontend and
+  action re-export it.
+- **B3 + B4 ✅** — the AI now returns `missingKeywords`; the result view shows a
+  gap checklist and a one-click **Boost toward 90** re-tailor that feeds the gaps
+  back into the prompt (honest: it only works in terms the profile supports).
+- **C1 ✅** README rewritten for the no-login app · **C2 ✅** manifest → Tailorly /
+  clay palette · **C3 ✅** "See how it works" scrolls to the section, billing
+  copy removed · **C9 ✅** Open Graph + Twitter tags.
+- **C6 (partial) ✅** — score gauge has `role="img"` + aria-label, wizard steps
+  use `aria-current="step"`.
+
+Still open: B1, B2, B5–B8, C4, C5, C7, C8 (documented in README), D1–D7, E-list.
+
+
 ---
 
 ## A. Correctness & robustness — fix first

@@ -95,7 +95,19 @@ const schema = defineSchema(
         }),
       ),
       createdAt: v.number(),
+      // High-value posting terms the tailored resume still doesn't cover —
+      // drives the gap checklist and the "boost to 90" re-tailor.
+      missingKeywords: v.optional(v.array(v.string())),
     }).index("by_profile", ["profileId"]),
+
+    // One row per (session, day) counting AI tailoring calls, so the
+    // login-free tailorResume action has a hard daily budget.
+    aiCalls: defineTable({
+      sessionId: v.string(),
+      day: v.string(),
+      count: v.number(),
+      createdAt: v.number(),
+    }).index("by_session_day", ["sessionId", "day"]),
   },
   {
     schemaValidation: false,

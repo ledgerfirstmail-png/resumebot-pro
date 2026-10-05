@@ -1,5 +1,13 @@
 import type { TailorResult } from "@/convex/ai";
-import { Check, Copy, FileText, Printer, RefreshCcw, Save } from "lucide-react";
+import {
+  Check,
+  Copy,
+  FileText,
+  Printer,
+  RefreshCcw,
+  Save,
+  Sparkles,
+} from "lucide-react";
 import { useState } from "react";
 import type { ResumeProfileData } from "@/types/resume";
 import { ClayButton } from "./ClayButton";
@@ -10,10 +18,15 @@ import { ScoreBreakdown, ScoreGauge } from "./ScoreGauge";
 export interface ResumeResultProps {
   jobTitle: string;
   companyName: string;
+  /** The original posting, shown collapsibly on the result view. */
+  jobDescription?: string;
   result: TailorResult;
   contact: ResumeProfileData;
   onSave: () => void;
   onRefine: () => void;
+  /** Re-tailor feeding the gap checklist back into the prompt. */
+  onBoost?: () => void;
+  isBoosting?: boolean;
   isSaving: boolean;
   /** True when showing an already-saved resume (hides the save action). */
   viewingSaved?: boolean;
@@ -23,10 +36,13 @@ export interface ResumeResultProps {
 export function ResumeResult({
   jobTitle,
   companyName,
+  jobDescription,
   result,
   contact,
   onSave,
   onRefine,
+  onBoost,
+  isBoosting = false,
   isSaving,
   viewingSaved = false,
 }: ResumeResultProps) {
@@ -109,6 +125,50 @@ export function ResumeResult({
         </div>
       </ClayCard>
 
+      {/* Gap checklist + boost-to-90 loop */}
+      {result.missingKeywords.length > 0 && (
+        <ClayCard>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="clay-title text-lg">
+                Still missing from this resume
+              </h3>
+              <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground">
+                {result.missingKeywords.length} term
+                {result.missingKeywords.length === 1 ? "" : "s"} from the
+                posting aren't clearly covered yet — that's what's keeping the
+                score under 90. Work them in only where they're true, or let
+                Tailorly try.
+              </p>
+            </div>
+            {onBoost && (
+              <ClayButton
+                onClick={onBoost}
+                disabled={isBoosting}
+                className="shrink-0"
+              >
+                {isBoosting ? (
+                  <RefreshCcw className="animate-spin" />
+                ) : (
+                  <Sparkles />
+                )}
+                {isBoosting ? "Boosting…" : "Boost toward 90"}
+              </ClayButton>
+            )}
+          </div>
+          <ul className="mt-4 flex flex-wrap gap-2">
+            {result.missingKeywords.map((kw) => (
+              <li
+                key={kw}
+                className="clay-chip px-3 py-1.5 text-xs font-semibold"
+              >
+                {kw}
+              </li>
+            ))}
+          </ul>
+        </ClayCard>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
         {/* Score breakdown */}
         <ClayCard>
@@ -127,6 +187,17 @@ export function ResumeResult({
                 ))}
               </div>
             </div>
+          )}
+
+          {jobDescription && (
+            <details className="mt-6 border-t border-border/60 pt-5">
+              <summary className="cursor-pointer select-none text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                The job posting you matched against
+              </summary>
+              <div className="clay-inset clay-scroll mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-2xl p-4 text-xs leading-5 text-muted-foreground">
+                {jobDescription}
+              </div>
+            </details>
           )}
         </ClayCard>
 

@@ -16,10 +16,11 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { getSessionId } from "@/lib/session";
 import type { ResumeProfileData } from "@/types/resume";
 import { ClayButton } from "./ClayButton";
 import { ClayCard } from "./ClayCard";
@@ -58,7 +59,11 @@ const jobSchema = z.object({
   companyName: z.string().min(1, "Company name is required"),
   jobDescription: z
     .string()
-    .min(120, "Paste the full job description (at least 120 characters)"),
+    .min(120, "Paste the full job description (at least 120 characters)")
+    .max(
+      20_000,
+      "That posting is huge — trim it to under 20,000 characters",
+    ),
 });
 
 type ProfileFormValues = z.infer<typeof profileSchema>;
@@ -148,8 +153,52 @@ const EMPTY_FORM: ProfileFormValues = {
   education: [],
 };
 
+const DRAFT_KEY = "tailorly_wizard_draft_v1";
+
+interface WizardDraft {
+  step?: number;
+  profile?: Record<string, unknown>;
+  job?: Record<string, unknown>;
+}
+
+/** Read the locally persisted wizard draft, if any (survives refresh). */
+function readDraft(): WizardDraft | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as WizardDraft;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function draftProfileDefaults(draft: WizardDraft | null): ProfileFormValues {
+  if (!draft?.profile) return EMPTY_FORM;
+  const p = draft.profile as Partial<ProfileFormValues>;
+  return {
+    ...EMPTY_FORM,
+    ...p,
+    skills: p.skills ?? [],
+    experience: p.experience ?? [],
+    education: p.education ?? [],
+  };
+}
+
+function draftJobDefaults(draft: WizardDraft | null): JobFormValues {
+  const base: JobFormValues = { jobTitle: "", companyName: "", jobDescription: "" };
+  if (!draft?.job) return base;
+  return { ...base, ...(draft.job as Partial<JobFormValues>) };
+}
+
 export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps) {
-  const [step, setStep] = useState(0);
+  // Draft read once on mount via lazy state init (render-safe, unlike a ref).
+  const [restoredDraft] = useState<WizardDraft | null>(() => readDraft());
+
+  const [step, setStep] = useState(() => {
+    const s = restoredDraft?.step;
+    return typeof s === "number" && s >= 0 && s < 2 ? s : 0;
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [skillDraft, setSkillDraft] = useState("");
   const saveProfile = useMutation(api.resumes.saveProfile);
@@ -157,9 +206,11 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
 
   const profileForm = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
-    defaultValues: initialProfile
-      ? profileToFormValues(initialProfile)
-      : EMPTY_FORM,
+    defaultValues: restoredDraft
+      ? draftProfileDefaults(restoredDraft)
+      : initialProfile
+        ? profileToFormValues(initialProfile)
+        : EMPTY_FORM,
   });
   const experienceArray = useFieldArray({
     control: profileForm.control,
@@ -173,8 +224,43 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
 
   const jobForm = useForm<JobFormValues>({
     resolver: zodResolver(jobSchema),
-    defaultValues: { jobTitle: "", companyName: "", jobDescription: "" },
+    defaultValues: draftJobDefaults(restoredDraft),
   });
+
+  // --- Draft autosave: a refresh mid-paste must not lose anything. ---
+  const profileTick = useWatch({ control: profileForm.control });
+  const jobTick = useWatch({ control: jobForm.control });
+  const [draftRetired, setDraftRetired] = useState(false);
+  const draftTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    // Generation succeeded — clear the draft and stop persisting.
+    if (draftRetired) {
+      window.clearTimeout(draftTimerRef.current);
+      try {
+        localStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    window.clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = window.setTimeout(() => {
+      try {
+        localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify({
+            step: step === 2 ? 1 : step,
+            profile: profileForm.getValues(),
+            job: jobForm.getValues(),
+          }),
+        );
+      } catch {
+        // Storage unavailable — drafts simply won't persist.
+      }
+    }, 600);
+    return () => window.clearTimeout(draftTimerRef.current);
+  }, [profileTick, jobTick, step, draftRetired, profileForm, jobForm]);
 
   const addSkill = () => {
     const value = skillDraft.trim();
@@ -231,7 +317,18 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
         jobTitle: job.jobTitle,
         companyName: job.companyName,
         jobDescription: job.jobDescription,
+        sessionId: getSessionId(),
       });
+
+      // Success — retire the local draft so a refresh starts clean. Every
+      // scheduled save fired long before generation finished (they're 600ms),
+      // so removing it here can't be overwritten by a pending timer.
+      setDraftRetired(true);
+      try {
+        localStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // ignore
+      }
 
       onGenerated({ result, job, profileId });
     } catch (error) {
@@ -267,7 +364,11 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
           const isDone = i < step || (i === 2 && isGenerating);
           const isActive = i === step;
           return (
-            <div key={s.key} className="flex flex-1 items-center gap-2 sm:gap-2.5">
+            <div
+              key={s.key}
+              className="flex flex-1 items-center gap-2 sm:gap-2.5"
+              aria-current={isActive ? "step" : undefined}
+            >
               <span
                 className={
                   "clay-orb size-9 shrink-0 text-sm font-extrabold " +

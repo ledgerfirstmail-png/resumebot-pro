@@ -1,6 +1,17 @@
 ## Overview
 
-This project uses the following tech stack:
+**Tailorly** — a single-user resume tailoring studio. Paste a job posting, get
+back a resume rewritten in the job's own language (never inventing experience),
+an honest 0–100 match score with a per-category breakdown, a gap checklist, and
+a one-click "boost toward 90" re-tailor. Styled with a Claymorphism theme.
+
+Routes:
+- `/` — landing page
+- `/dashboard` — the Resume Studio (3-step wizard → generator → result → saved
+  collection). **No login**: version 1 is deliberately a no-auth, single-user
+  workspace; `/auth` just redirects here.
+
+Tech stack:
 - Vite
 - Typescript
 - React Router v7 (all imports from `react-router` instead of `react-router-dom`)
@@ -9,13 +20,21 @@ This project uses the following tech stack:
 - Shadcn UI (for UI components library)
 - Lucide Icons (for icons)
 - Convex (for backend & database)
-- Convex Auth (for authentication)
+- `@vly-ai/integrations` (AI completions, called from the `ai:tailorResume` Convex action)
 - Framer Motion (for animations)
-- Three js (for 3d models)
+- Sonner (toasts)
 
 All relevant files live in the 'src' directory.
 
 Use bun for the package manager.
+
+Key source files:
+- `src/convex/ai.ts` — the tailoring action (rate-limited, input-capped, one retry)
+- `src/convex/aiUsage.ts` — daily per-session AI budget
+- `src/convex/resumes.ts` — profile upsert + saved resumes (de-duplicating save)
+- `src/components/clay/ResumeWizard.tsx` — the wizard (drafts autosave to localStorage)
+- `src/components/clay/ResumeResult.tsx` — score, gap checklist, boost, job posting view
+- `ROADMAP.md` — audit of what's missing / next upgrades
 
 ## Setup
 
@@ -30,88 +49,23 @@ The convex server has a separate set of environment variables that are accessibl
 Currently, these variables include auth-specific keys: JWKS, JWT_PRIVATE_KEY, and SITE_URL.
 
 
-# Using Authentication (Important!)
+# Authentication (shipped but inactive — v1 has no login)
 
-You must follow these conventions when using authentication.
+Tailorly v1 is a **no-login, single-user workspace**. The template's Convex Auth
+plumbing still exists but is intentionally inert, because these files are marked
+do-not-modify:
 
-## Auth is already set up.
+- `src/convex/auth.config.ts`, `src/convex/auth.ts`, `src/convex/auth/emailOtp.ts`
+- the `authTables` spread and `users` table in `src/convex/schema.ts`
+- `ConvexAuthProvider` wrapping the app in `src/main.tsx`
+- env keys `JWKS`, `JWT_PRIVATE_KEY`, `SITE_URL` on the Convex deployment
 
-All convex authentication functions are already set up. The auth currently uses email OTP and anonymous users, but can support more.
+What was removed and must NOT be reintroduced without asking: the `/auth` page
+(it now redirects to `/dashboard`), `RequireAuth`, and `hooks/use-auth`. All
+resume functions in `src/convex/resumes.ts` are deliberately unauthenticated.
 
-The email OTP configuration is defined in `src/convex/auth/emailOtp.ts`. DO NOT MODIFY THIS FILE.
-
-Also, DO NOT MODIFY THESE AUTH FILES: `src/convex/auth.config.ts` and `src/convex/auth.ts`.
-
-## Using Convex Auth on the backend
-
-On the `src/convex/users.ts` file, you can use the `getCurrentUser` function to get the current user's data.
-
-## Using Convex Auth on the frontend
-
-The `/auth` page is already set up to use auth. Navigate to `/auth` for all log in / sign up sequences.
-
-You MUST use this hook to get user data. Never do this yourself without the hook:
-```typescript
-import { useAuth } from "@/hooks/use-auth";
-
-const { isLoading, isAuthenticated, user, signIn, signOut } = useAuth();
-```
-
-## Protected Routes
-
-The starter `/dashboard` route is protected with `RequireAuth`. Extend that page
-for the product's authenticated experience, and reuse `RequireAuth` when adding
-another protected route — do NOT hand-roll a redirect to `/auth`, since landing
-on a bare sign-in form with no explanation of what was blocked is confusing.
-
-`RequireAuth` states the block on the page the visitor asked for and sends them
-to `/auth?returnTo=<current route>` when they choose to sign in, so they come
-back to it. Pass `title` and `description` to say what the page is:
-
-```tsx
-<Route
-  path="/dashboard"
-  element={
-    <RequireAuth
-      title="Sign in to view your dashboard"
-      description="Your projects and settings live here."
-    >
-      <Dashboard />
-    </RequireAuth>
-  }
-/>
-```
-
-Pass `redirectImmediately` for a route where bouncing straight to `/auth` really
-is better.
-
-## Auth Page
-
-The auth page is defined in `src/pages/Auth.tsx`. Send sign-in and sign-up actions
-to `/auth`.
-
-## Authorization
-
-You can perform authorization checks on the frontend and backend.
-
-On the frontend, you can use the `useAuth` hook to get the current user's data and authentication state.
-
-You should also be protecting queries, mutations, and actions at the base level, checking for authorization securely.
-
-## Adding a redirect after auth
-
-The `/auth` route in `src/main.tsx` redirects to `/dashboard` by default. If the
-product's main authenticated route is different, update `redirectAfterAuth` to
-that route. A validated same-origin `returnTo` query parameter takes priority so
-users can resume the protected page they originally requested. Never leave an
-authenticated product redirecting back to the public landing page.
-
-## Complete authenticated products
-
-When the requested product implies accounts, a workspace, a dashboard, or other
-signed-in functionality, the task is not complete with only a landing page and
-auth form. Build the main authenticated experience, protect its route, and verify
-that signing in reaches it.
+The only abuse protection is the anonymous per-session AI budget in
+`src/convex/aiUsage.ts` (25 tailoring runs/day/browser).
 
 # Frontend Conventions
 

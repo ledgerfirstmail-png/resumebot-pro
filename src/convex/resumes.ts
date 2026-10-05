@@ -97,13 +97,36 @@ export const saveResume = mutation({
     experience: v.array(experienceValidator),
     education: v.array(educationValidator),
     keywords: v.array(v.string()),
+    missingKeywords: v.optional(v.array(v.string())),
     breakdown: breakdownValidator,
   },
   handler: async (ctx, args) => {
     const profile = await ctx.db.get(args.profileId);
     if (!profile) throw new Error("Profile not found");
+
+    const { missingKeywords, ...rest } = args;
+    const doc = { ...rest, missingKeywords: missingKeywords ?? [] };
+
+    // De-duplicate: re-saving the same job replaces the previous version
+    // instead of stacking near-identical cards.
+    const existing = await ctx.db
+      .query("tailoredResumes")
+      .withIndex("by_profile", (q) => q.eq("profileId", args.profileId))
+      .collect();
+    const duplicate = existing.find(
+      (r) =>
+        r.jobTitle.trim().toLowerCase() ===
+          args.jobTitle.trim().toLowerCase() &&
+        r.companyName.trim().toLowerCase() ===
+          args.companyName.trim().toLowerCase(),
+    );
+    if (duplicate) {
+      await ctx.db.patch(duplicate._id, { ...doc, createdAt: Date.now() });
+      return duplicate._id;
+    }
+
     return await ctx.db.insert("tailoredResumes", {
-      ...args,
+      ...doc,
       createdAt: Date.now(),
     });
   },

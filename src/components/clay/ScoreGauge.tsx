@@ -31,6 +31,8 @@ export function ScoreGauge({
   return (
     <div className={cn("flex flex-col items-center gap-3", className)}>
       <div
+        role="img"
+        aria-label={`Match score ${clamped} out of 100 percent — ${tone.label}`}
         className="relative flex size-44 items-center justify-center rounded-full shadow-clay"
         style={{
           background: `conic-gradient(var(--primary) ${clamped * 3.6}deg, oklch(0.92 0.03 45 / 70%) ${clamped * 3.6}deg)`,
