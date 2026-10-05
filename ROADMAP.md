@@ -269,6 +269,21 @@ Still open: **D5** (production build — platform rule), C1/C2/C9
 (true PDF export), E-list 11/12 (shareable link, multi-profile), and
 alert delivery keys.
 
+## Resolved in the tenth pass (2026-10-05) — listings show on open
+
+- **Job listings visible immediately**: the radar no longer opens on an
+  empty list. On first mount with a profile it quietly runs a silent
+  **auto-scan with an empty query** (latest postings across all three
+  boards — no AI credits), and the empty state reads “Pulling the latest
+  listings…” while it runs. Results now have a **“Job listings” header**
+  (`N of M saved · sorted by match`), and the Scan-boards button
+  spins/disables during both manual and automatic scans. Loading state is
+  derived (`searching`) rather than set synchronously in the effect, so the
+  `react-hooks/set-state-in-effect` rule stays clean — a warning toast only
+  fires if the boards couldn't be reached.
+
+Verified: `tsc -b --noEmit` 0, lint 0 (0 errors/0 warnings), tests 53/53.
+
 
 ---
 

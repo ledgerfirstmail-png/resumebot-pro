@@ -16,7 +16,7 @@ import {
   Trash2,
   Wand2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getSessionId } from "@/lib/session";
 import type { ResumeProfileData } from "@/types/resume";
@@ -76,6 +76,10 @@ export function JobRadar({
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  // Auto-scan lifecycle: flipped only from promise callbacks (never
+  // synchronously inside the effect) so the empty state can show "pulling
+  // listings…" while the first silent scan runs.
+  const [autoScanDone, setAutoScanDone] = useState(false);
   const [minScore, setMinScore] = useState(40);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tailoringId, setTailoringId] = useState<string | null>(null);
@@ -92,6 +96,40 @@ export function JobRadar({
 
   const hasProfile = profile !== null && profile.title.trim().length > 0;
   const visible = (matches ?? []).filter((m) => m.score >= minScore);
+  // Spinner/copy driver: a manual scan, or the one silent first scan.
+  const searching =
+    isSearching ||
+    (hasProfile && matches !== undefined && matches.length === 0 && !autoScanDone);
+
+  /**
+   * Show listings on open: on first mount with a profile, quietly scan the
+   * boards with an empty query (latest postings across all three) when
+   * nothing is persisted yet — so the radar never opens on an empty list.
+   * Silent on success; a warning only when nothing could be fetched. All
+   * state changes happen in promise callbacks, never in the effect body.
+   */
+  const autoScanned = useRef(false);
+  useEffect(() => {
+    if (autoScanned.current || !hasProfile || matches === undefined) return;
+    autoScanned.current = true;
+    if (matches.length > 0) return; // already have listings to show
+    searchJobs({ query: "", location: undefined })
+      .then((out) => {
+        if (out.searched === 0) {
+          toast.warning(
+            out.errors.length > 0
+              ? `Couldn't reach the job boards — hit “Scan boards” to retry.`
+              : "No listings came back — try “Scan boards” again.",
+          );
+        }
+      })
+      .catch((error) => {
+        toast.error(
+          error instanceof Error ? error.message : "Couldn't load listings.",
+        );
+      })
+      .finally(() => setAutoScanDone(true));
+  }, [matches, hasProfile, searchJobs]);
 
   /** Feature 1 — find employers hiring right now, scored against the profile. */
   const handleSearch = async () => {
@@ -330,14 +368,14 @@ export function JobRadar({
             <ClayButton
               size="lg"
               onClick={handleSearch}
-              disabled={isSearching}
+              disabled={searching}
             >
-              {isSearching ? (
+              {searching ? (
                 <Loader2 className="animate-spin" />
               ) : (
                 <Radar />
               )}
-              {isSearching ? "Scanning…" : "Scan boards"}
+              {searching ? "Scanning…" : "Scan boards"}
             </ClayButton>
           </div>
 
@@ -379,13 +417,22 @@ export function JobRadar({
       ) : visible.length === 0 ? (
         <ClayCard className="p-8 text-center">
           <p className="text-sm text-muted-foreground">
-            {matches.length === 0
-              ? "Nothing scanned yet — run your first search above to pull live openings."
-              : `No listings at or above ${minScore}% right now — lower the bar or scan again.`}
+            {searching
+              ? "Pulling the latest listings from the boards…"
+              : matches.length === 0
+                ? "Nothing scanned yet — run your first search above to pull live openings."
+                : `No listings at or above ${minScore}% right now — lower the bar or scan again.`}
           </p>
         </ClayCard>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <>
+          <div className="flex items-baseline justify-between gap-2 px-1">
+            <h2 className="clay-title text-lg">Job listings</h2>
+            <span className="text-xs font-semibold text-muted-foreground">
+              {visible.length} of {matches.length} saved · sorted by match
+            </span>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
           {visible.map((match) => {
             const isSelected = selected.has(match._id);
             return (
@@ -539,7 +586,8 @@ export function JobRadar({
               </ClayCard>
             );
           })}
-        </div>
+          </div>
+        </>
       )}
 
       {/* Auto-apply bar */}
