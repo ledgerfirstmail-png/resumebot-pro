@@ -215,6 +215,11 @@ export function locationTerms(raw: string | null | undefined): string[] {
 /** Listings open to the whole world pass any location filter. */
 const ANYWHERE_RE = /\bremote\b|worldwide|anywhere|global|\bintl\b/;
 
+/** True when a posting location means "work from anywhere" (any chip passes). */
+export function isAnywhere(postLocation: string): boolean {
+  return ANYWHERE_RE.test(postLocation.toLowerCase());
+}
+
 /** US states (lowercase name → abbreviation), alphabetical; DC included. */
 export const US_STATES: Record<string, string> = {
   alabama: "al",

@@ -12,6 +12,7 @@ import {
   Mail,
   MapPin,
   Radar,
+  RefreshCw,
   Search,
   Send,
   Store,
@@ -21,6 +22,7 @@ import {
 } from "lucide-react";
 import { useEffect, Fragment, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { parseRadiusLocation } from "@/lib/geo";
 import { getSessionId } from "@/lib/session";
 import {
   addEmployerToQuery,
@@ -65,6 +67,11 @@ const LOCATION_PRESETS = [
   "United Kingdom",
 ];
 
+/** Radii the "within" select offers — 35mi is the local-commute default. */
+const RADIUS_OPTIONS = [10, 25, 35, 50, 100];
+/** Radius preselected when the user first opens the "within" picker. */
+const DEFAULT_RADIUS = 35;
+
 function daysAgo(ts?: number): string {
   if (!ts) return "";
   const days = Math.floor((Date.now() - ts) / 86_400_000);
@@ -96,6 +103,11 @@ export function JobRadar({
   const [query, setQuery] = useState("");
   // Multi-location scan: the chosen chips + the live draft typed in the field.
   const [locations, setLocations] = useState<string[]>([]);
+  // Radius chips (the 35-mile local scan): place + miles, sent as
+  // "<place> within <miles>mi" and distance-filtered by the server.
+  const [radiusChips, setRadiusChips] = useState<
+    Array<{ place: string; miles: number }>
+  >([]);
   const [locDraft, setLocDraft] = useState("");
   // Results-side filter over the locations actually saved on this board.
   const [locFilter, setLocFilter] = useState("");
@@ -231,13 +243,36 @@ export function JobRadar({
       .finally(() => setAutoScanDone(true));
   }, [matches, hasProfile, searchJobs]);
 
-  /** Location chips — the set of places the next scan targets. */
-  const addLocation = (raw: string) => {
+  /** Location chips — the set of places the next scan targets. A radius
+   * (place + "within N mi", parsed from typed text or the picker) is stored
+   * separately so it survives the comma-joined round-trip. */
+  const addLocation = (raw: string, radiusMiles?: number) => {
     const value = raw.trim().replace(/\s+/g, " ").slice(0, 40);
     setLocDraft("");
     if (value.length < 2) return;
-    if (locations.some((l) => l.toLowerCase() === value.toLowerCase())) return;
-    if (locations.length >= 8) {
+    const parsed = parseRadiusLocation(value);
+    const miles = radiusMiles ?? parsed.radiusMiles;
+    // Strip a typed-in "within" token when applying a picker radius.
+    const place =
+      (parsed.radiusMiles !== undefined ? parsed.location : value).trim();
+    if (place.length < 2) return;
+    if (miles !== undefined) {
+      setRadiusChips((prev) => [
+        ...prev.filter((c) => c.place.toLowerCase() !== place.toLowerCase()),
+        { place, miles },
+      ]);
+      // A radius chip replaces the plain chip for the same place.
+      setLocations((prev) =>
+        prev.filter((l) => l.toLowerCase() !== place.toLowerCase()),
+      );
+      return;
+    }
+    if (
+      locations.some((l) => l.toLowerCase() === value.toLowerCase()) ||
+      radiusChips.some((c) => c.place.toLowerCase() === value.toLowerCase())
+    )
+      return;
+    if (locations.length + radiusChips.length >= 8) {
       toast.info("Up to 8 locations at a time — remove one to add another.");
       return;
     }
@@ -249,6 +284,11 @@ export function JobRadar({
       prev.filter((l) => l.toLowerCase() !== value.toLowerCase()),
     );
 
+  const removeRadiusChip = (place: string) =>
+    setRadiusChips((prev) =>
+      prev.filter((c) => c.place.toLowerCase() !== place.toLowerCase()),
+    );
+
   const toggleLocation = (value: string) => {
     if (locations.some((l) => l.toLowerCase() === value.toLowerCase())) {
       removeLocation(value);
@@ -257,8 +297,29 @@ export function JobRadar({
     }
   };
 
-  /** Comma-joined locations consumed by the scan action and saved watches. */
-  const locationParam = locations.join(", ") || undefined;
+  /** Comma-joined locations consumed by the scan action and saved watches —
+   * radius chips carry their "within Nmi" token so the server can
+   * distance-filter (lib/geo.parseLocationChips splits them back out). */
+  const locationParam =
+    [
+      ...locations,
+      ...radiusChips.map((c) => `${c.place} within ${c.miles}mi`),
+    ].join(", ") || undefined;
+
+  /** Apply a picked radius to the draft (preferred) or the last plain chip. */
+  const handleRadiusPick = (miles: number) => {
+    const base =
+      locDraft.trim().length >= 2
+        ? locDraft
+        : locations.length > 0
+          ? locations[locations.length - 1]
+          : "";
+    if (base.trim().length < 2) {
+      toast.info("Type a city or ZIP first, then pick a radius.");
+      return;
+    }
+    addLocation(base, miles);
+  };
 
   /** Feature 1 — find employers hiring right now, scored against the profile. */
   const handleSearch = async () => {
@@ -502,6 +563,23 @@ export function JobRadar({
                   </button>
                 </span>
               ))}
+              {radiusChips.map((chip) => (
+                <span
+                  key={`r-${chip.place.toLowerCase()}`}
+                  className="flex items-center gap-1 rounded-full bg-primary/15 py-0.5 pl-2.5 pr-1.5 text-xs font-bold text-primary ring-1 ring-primary/40"
+                >
+                  <Radar className="size-3" />
+                  {chip.place} · within {chip.miles} mi
+                  <button
+                    type="button"
+                    onClick={() => removeRadiusChip(chip.place)}
+                    aria-label={`Remove ${chip.place} radius`}
+                    className="rounded-full text-primary/70 hover:text-primary"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
               <input
                 value={locDraft}
                 onChange={(e) => {
@@ -528,14 +606,30 @@ export function JobRadar({
                   if (locDraft.trim().length > 0) addLocation(locDraft);
                 }}
                 placeholder={
-                  locations.length === 0
-                    ? "City, state or town (optional)"
-                    : "Add city, state or town"
+                  locations.length + radiusChips.length === 0
+                    ? "City, state or ZIP (optional) — pick “within” for a radius scan"
+                    : "Add city, state or ZIP"
                 }
                 className="min-w-16 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
                 aria-label="Add a city, state, or town — comma or Enter adds it"
               />
             </div>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) handleRadiusPick(Number(e.target.value));
+              }}
+              aria-label="Scan within a radius of the typed place"
+              className="clay-inset h-11 cursor-pointer rounded-2xl px-2 text-sm font-semibold outline-none"
+              title="Distance-filter the scan to a radius around the typed place (35 mi = local)"
+            >
+              <option value="">within…</option>
+              {RADIUS_OPTIONS.map((miles) => (
+                <option key={miles} value={miles}>
+                  within {miles} mi
+                </option>
+              ))}
+            </select>
             <ClayButton
               size="lg"
               onClick={handleSearch}
@@ -547,6 +641,21 @@ export function JobRadar({
                 <Radar />
               )}
               {searching ? "Scanning…" : "Scan boards"}
+            </ClayButton>
+            <ClayButton
+              size="lg"
+              variant="soft"
+              onClick={handleSearch}
+              disabled={searching}
+              title="Re-scan the boards with the same search and refresh every score"
+              aria-label="Refresh listings"
+            >
+              {searching ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <RefreshCw />
+              )}
+              Refresh
             </ClayButton>
           </div>
 
@@ -590,11 +699,23 @@ export function JobRadar({
                 </option>
               ))}
             </select>
-            {locations.length > 0 && (
+            {radiusChips.length === 0 && (
+              <button
+                type="button"
+                onClick={() => handleRadiusPick(DEFAULT_RADIUS)}
+                title="Distance-filter the scan to 35 miles around the last place you typed"
+                className="rounded-full bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground ring-1 ring-border/60 transition-colors hover:bg-card hover:text-foreground"
+              >
+                <Radar className="mr-1 inline size-3" />
+                within 35 mi (local)
+              </button>
+            )}
+            {locations.length + radiusChips.length > 0 && (
               <button
                 type="button"
                 onClick={() => {
                   setLocations([]);
+                  setRadiusChips([]);
                   setLocFilter("");
                 }}
                 className="px-1 text-xs font-semibold text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
@@ -962,7 +1083,12 @@ export function JobRadar({
           <div className="mt-4 flex flex-col gap-3 rounded-2xl bg-card/70 p-4 ring-1 ring-border/60">
             <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
               Watching “{query.trim() || "all live openings”"}
-              {locations.length > 0 ? ` in ${locations.join(", ")}` : ""}
+              {locations.length + radiusChips.length > 0
+                ? ` in ${[
+                    ...locations,
+                    ...radiusChips.map((c) => `${c.place} ≤${c.miles}mi`),
+                  ].join(", ")}`
+                : ""}
             </p>
 
             <label className="flex items-center gap-2 text-sm">

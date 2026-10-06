@@ -18,10 +18,20 @@ import {
   locationTerms,
   matchProfileToPosting,
   matchesLocation,
+  isAnywhere,
   STOPWORDS,
   tokenize,
   type MatchProfile,
 } from "../lib/matchScore";
+import {
+  haversineMiles,
+  mentionsPlace,
+  nominatimFirstPlace,
+  normalizeGeoKey,
+  parseLocationChips,
+  type GeoPlace,
+  type RadiusChip,
+} from "../lib/geo";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { action, internalAction, type ActionCtx } from "./_generated/server";
@@ -40,6 +50,10 @@ import type { Id } from "./_generated/dataModel";
  */
 
 const FETCH_TIMEOUT_MS = 10_000;
+/** Nominatim's usage policy asks for a identifiable User-Agent and 1 req/s. */
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+/** Cached coordinates are trusted for a week, then re-resolved on demand. */
+const GEO_TTL_MS = 7 * 24 * 3_600_000;
 /** Postings persisted per search (the table self-prunes past 150 "new"). */
 const MAX_POSTINGS = 40;
 const MAX_DESCRIPTION_CHARS = 4_000;
@@ -448,12 +462,172 @@ async function fetchWinco(query: string): Promise<RawPosting[]> {
   });
 }
 
+/**
+ * Resolve one place string to coordinates: cache first, then Nominatim.
+ * Never throws — an unreachable geocoder only disables distance filtering.
+ */
+async function resolvePlace(
+  ctx: ActionCtx,
+  place: string,
+): Promise<GeoPlace | null> {
+  const key = normalizeGeoKey(place);
+  if (!key) return null;
+  try {
+    const cached = await ctx.runQuery(internal.geo.lookup, { query: key });
+    if (cached && Date.now() - cached.resolvedAt < GEO_TTL_MS) {
+      return { displayName: cached.displayName, lat: cached.lat, lon: cached.lon };
+    }
+    const url =
+      `${NOMINATIM_URL}?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(place)}`;
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "TailorlyJobRadar/1.0 (resume match scoring)",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const place0 = nominatimFirstPlace(await res.json());
+    if (!place0) return null;
+    await ctx.runMutation(internal.geo.save, {
+      query: key,
+      displayName: place0.displayName,
+      lat: place0.lat,
+      lon: place0.lon,
+    });
+    return place0;
+  } catch {
+    // The geocoder being down must never fail a scan — plain location
+    // filtering still applies.
+    return null;
+  }
+}
+
+/**
+ * Radius up to which the name-match fallback may pass postings that couldn't
+ * be geocoded — 35 miles around a named town covers its metro; wider radii
+ * need real coordinates instead of a name check.
+ */
+const RADIUS_FALLBACK_MAX_MILES = 35;
+
+/** Cache-only coordinate read for an exact posting-location string. */
+async function cachedPlaceFor(
+  ctx: ActionCtx,
+  exact: string,
+): Promise<GeoPlace | null> {
+  const key = normalizeGeoKey(exact);
+  if (!key) return null;
+  try {
+    const cached = await ctx.runQuery(internal.geo.lookup, { query: key });
+    if (!cached) return null;
+    return { displayName: cached.displayName, lat: cached.lat, lon: cached.lon };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Filter postings to the requested radius chips (the 35-mile local scan).
+ * Each chip's origin ("Columbus, OH within 35mi") is resolved once via the
+ * geocode cache + Nominatim. A posting passes a chip when its location
+ * string is cached and measures inside the radius, or — when its string was
+ * never geocoded and the radius is commute-sized (≤35mi) — when it names the
+ * chip's place. Postings open to the whole world always pass; plain chips
+ * in the same search still apply any-of ("…within 35mi" + "Remote").
+ */
+async function filterByRadius(
+  ctx: ActionCtx,
+  postings: RawPosting[],
+  chips: RadiusChip[],
+): Promise<{ postings: RawPosting[]; origins: Map<string, GeoPlace | null> }> {
+  const radiusChips = chips.filter((c) => c.radiusMiles !== undefined);
+  const plainTerms = chips
+    .filter((c) => c.radiusMiles === undefined)
+    .flatMap((c) => locationTerms(c.location));
+  if (radiusChips.length === 0) {
+    // No radius asked — plain any-of location filtering only.
+    const filtered =
+      plainTerms.length > 0
+        ? postings.filter((p) => matchesLocation(p.location, plainTerms))
+        : postings;
+    return { postings: filtered, origins: new Map() };
+  }
+
+  // Resolve each radius chip's origin once (cache makes repeats cheap).
+  const origins = new Map<string, GeoPlace | null>();
+  for (const chip of radiusChips) {
+    origins.set(chip.location, await resolvePlace(ctx, chip.location));
+  }
+
+  // Pre-read the geocode cache for every distinct posting-location string
+  // (full string + its city part) so the filter below stays synchronous.
+  const exactKeys = new Set<string>();
+  for (const p of postings) {
+    const trimmed = p.location.trim();
+    if (trimmed.length >= 2) exactKeys.add(trimmed);
+    const firstPart = trimmed.split(",")[0].trim();
+    if (firstPart.length >= 2) exactKeys.add(firstPart);
+  }
+  const cache = new Map<string, GeoPlace | null>();
+  for (const key of exactKeys) {
+    cache.set(key, await cachedPlaceFor(ctx, key));
+  }
+
+  const filtered = postings.filter((p) => {
+    if (isAnywhere(p.location)) return true;
+    const trimmed = p.location.trim();
+    const firstPart = trimmed.split(",")[0].trim();
+    const candidates = [
+      ...new Set([trimmed, firstPart].filter((s) => s.length >= 2)),
+    ];
+    for (const chip of radiusChips) {
+      const origin = origins.get(chip.location);
+      if (!origin) continue; // geocoder failed for this chip — no distance checks
+      const radius = chip.radiusMiles ?? 0;
+      let radiusPass = false;
+      let sawCached = false;
+      for (const candidate of candidates) {
+        const place = cache.get(normalizeGeoKey(candidate));
+        if (!place) continue;
+        sawCached = true;
+        if (
+          haversineMiles(origin.lat, origin.lon, place.lat, place.lon) <=
+          radius
+        ) {
+          radiusPass = true;
+          break;
+        }
+      }
+      if (
+        !radiusPass &&
+        !sawCached &&
+        radius <= RADIUS_FALLBACK_MAX_MILES &&
+        mentionsPlace(p.location, chip.location)
+      ) {
+        // Names the place but was never geocoded — commute-sized radii trust
+        // the name; wider radii need real coordinates.
+        radiusPass = true;
+      }
+      if (radiusPass) return true;
+    }
+    // Plain chips in the same search still apply any-of.
+    return plainTerms.length > 0
+      ? matchesLocation(p.location, plainTerms)
+      : false;
+  });
+  return { postings: filtered, origins };
+}
+
 /** Fetch every board independently — one outage must not kill the search. */
 async function gatherPostings(
+  ctx: ActionCtx,
   query: string,
   location?: string,
 ): Promise<{ postings: RawPosting[]; errors: string[] }> {
-  const locTerms = locationTerms(location);
+  const chips = location ? parseLocationChips(location) : [];
+  // Radius tokens must never leak into board search text ("oh within 35mi")
+  // — derive the terms from the parsed chips' bare places instead.
+  const locTerms = chips.flatMap((c) => locationTerms(c.location));
   const wdSearchText = buildWorkdaySearchText(query, locTerms);
   const workdayEmployers = LOCAL_EMPLOYERS.filter((e) => e.workday);
 
@@ -506,9 +680,22 @@ async function gatherPostings(
   }
 
   // Locations: the user may pick several at once — a listing passes when it
-  // is open to the whole world or mentions ANY requested term.
-  if (locTerms.length > 0) {
+  // is open to the whole world or mentions ANY requested term. When a radius
+  // chip is present this pre-filter is deferred to filterByRadius: a 35-mile
+  // scan must keep neighboring towns that never spell the origin's name.
+  if (
+    locTerms.length > 0 &&
+    !chips.some((c) => c.radiusMiles !== undefined)
+  ) {
     postings = postings.filter((p) => matchesLocation(p.location, locTerms));
+  }
+
+  // 35-mile radius scan: geocode each radius chip's origin once (cached),
+  // then keep postings measuring inside the radius — or naming the place
+  // for commute-sized chips. Plain chips still apply any-of inside.
+  if (chips.some((c) => c.radiusMiles !== undefined)) {
+    const radiusOut = await filterByRadius(ctx, postings, chips);
+    return { postings: radiusOut.postings, errors };
   }
 
   return { postings, errors };
@@ -574,7 +761,7 @@ export const searchJobs = action({
       );
     }
 
-    const { postings, errors } = await gatherPostings(query, location);
+    const { postings, errors } = await gatherPostings(ctx, query, location);
 
     const scored: PostingItem[] = postings
       .map((p) => {
@@ -678,6 +865,7 @@ async function sweepWatch(
   if (!profileData) return "Skipped: no resume profile on this account yet.";
 
   const { postings, errors } = await gatherPostings(
+    ctx,
     watch.query,
     watch.location,
   );

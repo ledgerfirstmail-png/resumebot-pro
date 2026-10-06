@@ -221,6 +221,18 @@ const schema = defineSchema(
       lastStatus: v.optional(v.string()),
       createdAt: v.number(),
     }).index("by_user", ["userId"]),
+
+    // Geocode cache for the 35-mile radius scan (ROADMAP P20): one row per
+    // resolved place string ("Columbus, OH", "43215") holding its
+    // coordinates. Shared across users; resolved via Nominatim on miss.
+    geoCache: defineTable({
+      // Normalized place string (see lib/geo.normalizeGeoKey).
+      query: v.string(),
+      displayName: v.string(),
+      lat: v.number(),
+      lon: v.number(),
+      resolvedAt: v.number(),
+    }).index("by_query", ["query"]),
   },
   {
     schemaValidation: false,
