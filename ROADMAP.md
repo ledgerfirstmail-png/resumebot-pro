@@ -493,6 +493,60 @@ rejections, URL joining), plus live probes: invalid slug → null, unknown slug
 Still open: **D5** (production build — platform rule); share-link happy path
 through the UI awaits a saved resume (the deployment has none yet).
 
+## Resolved in the seventeenth pass (2026-10-06) — E4 resume file upload
+
+- **Upload a PDF or DOCX to autofill the wizard** (roadmap **E4**, closes the
+  file half of B5 — paste already shipped in pass 9):
+  - **New Convex Node action `extractResume:extractResumeText`** reads the
+    file server-side (`{fileBase64, filename}` → `{text, kind, charCount}`)
+    so the parsers never enter the client bundle. No AI credits — it's pure
+    extraction; the text then flows through the existing `ai:parseResumeText`
+    pass (same budget/retry/run log) exactly as if pasted.
+  - **PDF**: `pdf-parse@2` (pdf.js). Two real deployment-environment problems
+    were found by pushing and **fixed at the cause**: (1) pdf.js touches
+    `DOMMatrix` at module scope and its Node fallback needs the native
+    `@napi-rs/canvas`, which can't ship inside Convex's JS bundle →
+    `src/lib/renderShims.ts` installs identity render stubs before pdf.js
+    first evaluates (text extraction never renders); (2) pdf.js then failed
+    "Setting up fake worker" because `pdf.worker.mjs` isn't on disk in the
+    bundle → `src/lib/pdfText.ts` statically imports the worker module, which
+    self-registers `globalThis.pdfjsWorker` (pdf.js's documented in-process
+    mode). pdf-parse is imported dynamically, after the shims, so Convex's
+    module analysis of the action never evaluates pdf.js.
+  - **DOCX**: new `src/lib/docxText.ts` — fflate unzip of `word/document.xml`
+    (a zip, not a Word binary, so legacy `.doc` is rejected with a friendly
+    message), paragraph/line/tab mapping, field-code and deleted-text
+    stripping, single-pass entity decoding (`&amp;lt;` → `&lt;`, numeric
+    entities → real characters).
+  - **Shared guards (`src/lib/resumeFile.ts`)**: extension **and** magic-byte
+    agreement (`%PDF` / `PK\x03\x04`), 5 MB cap checked before and after
+    decode, portable `bytesToBase64`, `normalizeExtractedText` (newline
+    normalization, control-character strip, and removal of pdf-parse's own
+    `-- 1 of 1 --` page markers), and the 120-char floor that distinguishes
+    real text from scanned images.
+  - **Wizard step 1**: the import panel now has a **drop zone + file picker**
+    (“Drop your PDF or DOCX here, or browse”, accepts `.pdf`/`.docx`, up to
+    5 MB) under the “Paste or upload” toggle. Extraction only fills the
+    review textarea — **the AI still runs only when the user clicks
+    Autofill**, so every import is visible/editable before it costs a credit.
+- **Friendly failure modes** (client + server, live-verified): unsupported
+  extension, extension/magic mismatch, corrupt zip, zip without
+  `word/document.xml`, password-protected PDF, unreadable/corrupt PDF, and
+  no-text/blank PDF (“may be a scanned image — paste the text instead”).
+
+Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
+**124/124 tests** (23 new — magic detection, base64 chunk round-trips,
+normalization incl. page markers, DOCX XML/entity mapping + real-zip
+extraction, PDF extraction through pdf-parse on jsPDF-built PDFs).
+Live-verified on the deployment: PDF extracted (290 chars, correct order,
+marker stripped), DOCX extracted (entities/tabs/field codes handled), all six
+error paths friendly, and a real **extract → `ai:parseResumeText`** round trip
+produced the correct form JSON (name, email, location, role, bullets,
+education).
+
+Still open: **D5** (production build — platform rule); share-link UI happy
+path awaits a saved resume.
+
 
 ---
 

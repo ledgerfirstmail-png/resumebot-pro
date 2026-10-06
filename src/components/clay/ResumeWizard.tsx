@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardPaste,
+  FileUp,
   Link2,
   Loader2,
   Plus,
@@ -22,6 +23,12 @@ import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { getSessionId } from "@/lib/session";
+import {
+  MAX_RESUME_FILE_BYTES,
+  bytesToBase64,
+  detectResumeFileKind,
+  hasSupportedExtension,
+} from "@/lib/resumeFile";
 import {
   jobSchema,
   mergeFormValues,
@@ -151,8 +158,10 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
   const tailorResume = useAction(api.ai.tailorResume);
   const extractJobPosting = useAction(api.ai.extractJobPosting);
   const parseResumeText = useAction(api.ai.parseResumeText);
+  const extractResumeFile = useAction(api.extractResume.extractResumeText);
   const [resumeDraft, setResumeDraft] = useState("");
   const [isParsing, setIsParsing] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [showResumeImport, setShowResumeImport] = useState(false);
 
   const profileForm = useForm<ProfileFormValues>({
@@ -266,6 +275,51 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
       );
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  /**
+   * E4 — read a PDF/DOCX into the paste box. The extracted text lands in the
+   * existing draft textarea, so Autofill (the AI parse pass) runs exactly as
+   * if the user had pasted it — no AI is spent until they click it.
+   */
+  const handleUploadFile = async (file: File) => {
+    if (isExtracting) return;
+    if (file.size > MAX_RESUME_FILE_BYTES) {
+      toast.error(
+        `“${file.name}” is over 5 MB — paste the text instead, or export a smaller copy.`,
+      );
+      return;
+    }
+    setIsExtracting(true);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      // Same checks the server runs — cheap feedback before the upload.
+      if (!detectResumeFileKind(file.name, bytes)) {
+        toast.error(
+          hasSupportedExtension(file.name)
+            ? `“${file.name}” doesn't look like a readable file — re-export it, or paste the text instead.`
+            : `Tailorly reads .pdf and .docx files — “${file.name}” isn't one.`,
+        );
+        return;
+      }
+      const { text, charCount } = await extractResumeFile({
+        fileBase64: bytesToBase64(bytes),
+        filename: file.name,
+      });
+      setResumeDraft(text);
+      setShowResumeImport(true);
+      toast.success(
+        `${file.name} read — ${charCount.toLocaleString()} characters extracted. Give it a quick scan, then Autofill.`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't read that file — paste the text instead.",
+      );
+    } finally {
+      setIsExtracting(false);
     }
   };
 
@@ -423,7 +477,8 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <ClipboardPaste className="size-4 text-primary" />
-                  Have a resume already? Paste it and skip the typing.
+                  Have a resume already? Upload the file or paste it — skip
+                  the typing.
                 </div>
                 <ClayButton
                   variant="ghost"
@@ -431,11 +486,49 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
                   onClick={() => setShowResumeImport((v) => !v)}
                   aria-expanded={showResumeImport}
                 >
-                  {showResumeImport ? "Not now" : "Paste to autofill"}
+                  {showResumeImport ? "Not now" : "Paste or upload"}
                 </ClayButton>
               </div>
               {showResumeImport && (
                 <div className="mt-3 flex flex-col gap-2">
+                  {/* E4 — upload a PDF/DOCX into the same draft textarea. */}
+                  <div
+                    className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-border/70 bg-background/60 px-4 py-5 text-center"
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const file = e.dataTransfer.files?.[0];
+                      if (file) void handleUploadFile(file);
+                    }}
+                  >
+                    <label className="flex cursor-pointer flex-col items-center gap-1.5 text-sm font-semibold">
+                      <FileUp className="size-4 text-primary" />
+                      <span>
+                        {isExtracting
+                          ? "Reading your file…"
+                          : "Drop your PDF or DOCX here, or browse"}
+                      </span>
+                      <input
+                        type="file"
+                        accept=".pdf,.docx,application/pdf"
+                        className="sr-only"
+                        disabled={isExtracting}
+                        aria-label="Upload a resume file (PDF or DOCX)"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (file) void handleUploadFile(file);
+                        }}
+                      />
+                      <span className="text-xs font-normal text-muted-foreground">
+                        The text lands below for review — the AI only runs when
+                        you Autofill. Up to 5 MB.
+                      </span>
+                    </label>
+                    {isExtracting && (
+                      <Loader2 className="size-4 animate-spin text-primary" />
+                    )}
+                  </div>
                   <textarea
                     className={FIELD_TEXTAREA}
                     value={resumeDraft}
