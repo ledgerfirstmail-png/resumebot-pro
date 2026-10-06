@@ -410,6 +410,48 @@ foreign, anywhere pass, 51-name picker).
 
 Still open: **D5** (production build — platform rule).
 
+## Resolved in the fifteenth pass (2026-10-06) — local retail & food employers
+
+- **Direct scans of named chains** ("include food outlets like Walmart, Big
+  Lots, Home Depot, Lowe's, Taco Bell, WinCo, Starbucks… scan all local
+  listings in the area"): new `src/lib/localEmployers.ts` registry + fetchers
+  in `gatherPostings` — every source probed live before wiring:
+  - **Workday career sites (6, JSON)**: Walmart (`wd504/WalmartExternal`),
+    Home Depot (`CareerDepot`), Lowe's (`LWS_External_CS`), Target
+    (`targetcareers`), Chipotle, Dollar Tree — list POST + per-job detail GET
+    for the real location, full description, and `startDate` (the list view
+    only has a vague `locationsText` and a relative `postedOn`).
+  - **Taco Bell** — WordPress site with a server-rendered JSON-LD ItemList;
+    job URL slugs carry title + city + state (`manager-in-training-or/
+    the-dalles-or/955703939` → "Manager In Training, The Dalles, OR").
+  - **WinCo Foods** — iCims list view (cookie-gated server render): rows give
+    title/snippet, detail pages give city-state + posted date + description.
+- **Location-first employer search**: `buildWorkdaySearchText` prefers the
+  scan's location chips (Workday matches location text — "austin tx" returns
+  Walmart's 59 Austin openings), else the query with brand words stripped
+  ("walmart cashier" → "cashier"), else newest. Local query/location filters
+  still run over everything afterwards, and each source fails independently
+  (`Promise.allSettled`, errors surfaced in the existing error list).
+- **Employers chip row** in Job Radar: ten toggleable brand chips (Walmart,
+  Big Lots, Home Depot, Lowe's, Taco Bell, WinCo Foods, Starbucks, Target,
+  Chipotle, Dollar Tree) below Locations — clicking adds/removes the brand
+  token in the search box (so watches store it too), `aria-pressed`, active
+  state syncs with manually typed brand names. Brands without a key-free feed
+  (Starbucks' SSO portal, Big Lots' UKG board) ride the five aggregators'
+  full-text search.
+- **Pure, tested helpers**: alias/misspelling matching ("lows" → Lowe's,
+  "star bucks" → Starbucks, whole-word only), query add/remove/strip,
+  Workday relative-date parsing ("Posted 30+ Days Ago" → ms), and the three
+  HTML/JSON parsers.
+
+Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
+**93/93 tests** (18 new — registry/chips, searchText, postedOn, Taco Bell/
+WinCo parsers), plus a live smoke against today's pages: Taco Bell 23 jobs
+parsed, WinCo list 20 rows + detail ("Logan, Utah", posted date), Walmart
+list/detail (Austin, TX + 13 KB description).
+
+Still open: **D5** (production build — platform rule).
+
 
 ---
 

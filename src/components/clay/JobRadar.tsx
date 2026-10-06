@@ -14,6 +14,7 @@ import {
   Radar,
   Search,
   Send,
+  Store,
   Trash2,
   Wand2,
   X,
@@ -21,6 +22,12 @@ import {
 import { useEffect, Fragment, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getSessionId } from "@/lib/session";
+import {
+  addEmployerToQuery,
+  EMPLOYER_CHIP_NAMES,
+  isEmployerSelected,
+  removeEmployerFromQuery,
+} from "@/lib/localEmployers";
 import { US_STATE_NAMES } from "@/lib/matchScore";
 import type { ResumeProfileData } from "@/types/resume";
 
@@ -595,6 +602,41 @@ export function JobRadar({
                 Clear
               </button>
             )}
+          </div>
+
+          {/* Local employers (retail & food) quick-picks */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              <Store className="size-3.5" /> Employers
+            </span>
+            {EMPLOYER_CHIP_NAMES.map((name) => {
+              const active = isEmployerSelected(query, name);
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() =>
+                    setQuery((prev) =>
+                      active
+                        ? removeEmployerFromQuery(prev, name)
+                        : addEmployerToQuery(prev, name),
+                    )
+                  }
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 transition-colors ${
+                    active
+                      ? "bg-primary/15 text-primary ring-primary/40"
+                      : "text-muted-foreground ring-border/60 hover:bg-card hover:text-foreground"
+                  }`}
+                >
+                  {name}
+                </button>
+              );
+            })}
+            <span className="text-[11px] text-muted-foreground/80">
+              Brand chips scan their careers feeds — pair with a city for
+              local hiring.
+            </span>
           </div>
 
           {/* Match threshold */}

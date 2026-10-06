@@ -4,6 +4,17 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { htmlToText } from "../lib/aiParse";
 import {
+  buildWorkdaySearchText,
+  LOCAL_EMPLOYERS,
+  parsePostedOn,
+  parseTacoBellListings,
+  parseWincoDetail,
+  parseWincoListings,
+  stripBrandTerms,
+  type LocalEmployer,
+  type WincoListing,
+} from "../lib/localEmployers";
+import {
   locationTerms,
   matchProfileToPosting,
   matchesLocation,
@@ -18,12 +29,14 @@ import type { Id } from "./_generated/dataModel";
 
 /**
  * Job Radar search (feature: "find employers that are hiring and score the
- * resume for a match"). Aggregates five key-free job boards (incl. US
- * city/state sources for local hiring), filters to the query and locations,
- * and scores every listing against the owner's profile with the pure
- * deterministic matcher — no AI credits spent on search. The hourly watch
- * sweep reuses the same pipeline and pushes new matches out by email and
- * Telegram (see notify.ts).
+ * resume for a match"). Aggregates five key-free job boards plus the local
+ * retail/food employer feeds — Workday career sites (Walmart, Home Depot,
+ * Lowe's, Target, Chipotle, Dollar Tree), Taco Bell's WordPress/JSON-LD list,
+ * and WinCo's iCims view — then filters to the query and locations and scores
+ * every listing against the owner's profile with the pure deterministic
+ * matcher — no AI credits spent on search. The hourly watch sweep reuses the
+ * same pipeline and pushes new matches out by email and Telegram (see
+ * notify.ts).
  */
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -74,6 +87,52 @@ async function fetchJson(url: string, headers?: Record<string, string>) {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as unknown;
+}
+
+/** POST JSON to a key-free employer API (Workday's list endpoint is POST). */
+async function postJson(
+  url: string,
+  body: unknown,
+  headers?: Record<string, string>,
+) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "User-Agent": "TailorlyJobRadar/1.0 (resume match scoring)",
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as unknown;
+}
+
+/** Fetch a server-rendered listing/detail page as text. */
+async function fetchText(url: string, headers?: Record<string, string>) {
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "TailorlyJobRadar/1.0 (resume match scoring)",
+      Accept: "text/html,application/xhtml+xml",
+      ...headers,
+    },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const setCookie = res.headers.get("set-cookie") ?? "";
+  const text = await res.text();
+  return { text, setCookie };
+}
+
+/** Reduce a Set-Cookie header to the "a=b; c=d" request header. */
+function cookieHeader(setCookie: string): string {
+  return setCookie
+    .split(/,(?=[^;,]+=)/)
+    .map((pair) => pair.split(";")[0].trim())
+    .filter(Boolean)
+    .join("; ");
 }
 
 /** Remotive — remote jobs, supports server-side `search`. */
@@ -256,26 +315,170 @@ async function fetchArbeitnow(): Promise<RawPosting[]> {
   });
 }
 
+/**
+ * One Workday-hosted employer (Walmart, Home Depot, Lowe's, Target, Chipotle,
+ * Dollar Tree): list call → detail the top rows for the real location,
+ * description, and start date. `searchText` is location-first so a city-scoped
+ * scan lands on that employer's local stores.
+ */
+async function fetchWorkdayEmployer(
+  emp: LocalEmployer,
+  searchText: string,
+): Promise<RawPosting[]> {
+  const wd = emp.workday;
+  if (!wd) return [];
+  const base = `https://${wd.host}/wday/cxs/${wd.company}/${wd.site}`;
+  const data = (await postJson(`${base}/jobs`, {
+    appliedFacets: {},
+    limit: 5,
+    offset: 0,
+    searchText,
+  })) as { jobPostings?: unknown[] };
+  const rows = (data.jobPostings ?? []).flatMap((entry) => {
+    const j = (entry ?? {}) as Record<string, unknown>;
+    const title = str(j.title);
+    const path = str(j.externalPath);
+    if (!title || !path) return [];
+    return [
+      {
+        title,
+        path,
+        locationsText: str(j.locationsText),
+        postedOn: str(j.postedOn),
+      },
+    ];
+  });
+  if (rows.length === 0) return [];
+
+  // The list view has no description and often only a vague location
+  // ("2 Locations") — the detail call carries the real data.
+  const details = await Promise.allSettled(
+    rows.map((row) => {
+      const slug = row.path.split("/").filter(Boolean).pop() ?? "";
+      return fetchJson(`${base}/job/${encodeURIComponent(slug)}`);
+    }),
+  );
+
+  return rows.map((row, i) => {
+    const settled = details[i];
+    const info =
+      settled.status === "fulfilled"
+        ? ((settled.value as { jobPostingInfo?: Record<string, unknown> })
+            ?.jobPostingInfo ?? undefined)
+        : undefined;
+    const description = info ? htmlToText(str(info.jobDescription)) : "";
+    const startDate = info ? str(info.startDate) : "";
+    return {
+      source: "workday",
+      externalId: row.path,
+      title: row.title,
+      company: emp.name,
+      description: description.slice(0, MAX_DESCRIPTION_CHARS),
+      url: `https://${wd.host}${row.path}`,
+      location:
+        str(info?.location) || row.locationsText || "Unspecified",
+      postedAt:
+        (startDate ? parseDate(startDate) : undefined) ??
+        parsePostedOn(row.postedOn),
+      tags: [emp.name],
+    };
+  });
+}
+
+/**
+ * Taco Bell — WordPress site with a server-rendered JSON-LD ItemList of the
+ * 25 newest openings (job slugs carry title + city + state). No server-side
+ * search or pagination: the boards' full-text search and the local
+ * query/location filters narrow it from there.
+ */
+async function fetchTacoBell(): Promise<RawPosting[]> {
+  const { text } = await fetchText("https://jobs.tacobell.com/jobs");
+  return parseTacoBellListings(text).slice(0, 15).map((job) => ({
+    source: "tacobell",
+    externalId: job.externalId,
+    title: job.title,
+    company: "Taco Bell",
+    description: "",
+    url: job.url,
+    location: job.location,
+    tags: ["Taco Bell"],
+  }));
+}
+
+/**
+ * WinCo Foods — iCims careers search rendered server-side (cookie-gated):
+ * list rows carry title + snippet, detail pages carry the actual location and
+ * posted date, so the top rows are detailed before local filtering.
+ */
+async function fetchWinco(query: string): Promise<RawPosting[]> {
+  const base = "https://careers-winco.icims.com/jobs/search";
+  const seed = await fetchText(`${base}?in_iframe=1`);
+  const cookie = cookieHeader(seed.setCookie);
+  const keyword = stripBrandTerms(query);
+  const url = `${base}?${
+    keyword ? `searchKeyword=${encodeURIComponent(keyword)}&` : ""
+  }in_iframe=1`;
+  const { text } = await fetchText(url, cookie ? { Cookie: cookie } : {});
+  const rows = parseWincoListings(text).slice(0, 6);
+  if (rows.length === 0) return [];
+
+  const details = await Promise.allSettled(
+    rows.map((row) => fetchText(row.url, cookie ? { Cookie: cookie } : {})),
+  );
+
+  return rows.map((row: WincoListing, i) => {
+    const info =
+      details[i].status === "fulfilled"
+        ? parseWincoDetail(details[i].value.text)
+        : {};
+    return {
+      source: "winco",
+      externalId: row.externalId,
+      title: row.title,
+      company: "WinCo Foods",
+      description: (info.description || row.description).slice(
+        0,
+        MAX_DESCRIPTION_CHARS,
+      ),
+      url: row.url,
+      location: info.location || "Unspecified",
+      postedAt: info.postedAt,
+      tags: ["WinCo Foods"],
+    };
+  });
+}
+
 /** Fetch every board independently — one outage must not kill the search. */
 async function gatherPostings(
   query: string,
   location?: string,
 ): Promise<{ postings: RawPosting[]; errors: string[] }> {
-  const settled = await Promise.allSettled([
-    fetchRemotive(query),
-    fetchRemoteOk(),
-    fetchArbeitnow(),
-    fetchTheMuse(),
-    fetchJobicy(),
-  ]);
-  const names = ["remotive", "remoteok", "arbeitnow", "muse", "jobicy"];
+  const locTerms = locationTerms(location);
+  const wdSearchText = buildWorkdaySearchText(query, locTerms);
+  const workdayEmployers = LOCAL_EMPLOYERS.filter((e) => e.workday);
+
+  const tasks: Array<{ name: string; run: () => Promise<RawPosting[]> }> = [
+    { name: "remotive", run: () => fetchRemotive(query) },
+    { name: "remoteok", run: () => fetchRemoteOk() },
+    { name: "arbeitnow", run: () => fetchArbeitnow() },
+    { name: "muse", run: () => fetchTheMuse() },
+    { name: "jobicy", run: () => fetchJobicy() },
+    ...workdayEmployers.map((emp) => ({
+      name: emp.name.toLowerCase().replace(/[^a-z]/g, ""),
+      run: () => fetchWorkdayEmployer(emp, wdSearchText),
+    })),
+    { name: "tacobell", run: () => fetchTacoBell() },
+    { name: "winco", run: () => fetchWinco(query) },
+  ];
+
+  const settled = await Promise.allSettled(tasks.map((t) => t.run()));
   const errors: string[] = [];
   const raw: RawPosting[] = [];
   settled.forEach((result, i) => {
     if (result.status === "fulfilled") raw.push(...result.value);
     else
       errors.push(
-        `${names[i]}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        `${tasks[i].name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
       );
   });
 
@@ -304,7 +507,6 @@ async function gatherPostings(
 
   // Locations: the user may pick several at once — a listing passes when it
   // is open to the whole world or mentions ANY requested term.
-  const locTerms = locationTerms(location);
   if (locTerms.length > 0) {
     postings = postings.filter((p) => matchesLocation(p.location, locTerms));
   }
