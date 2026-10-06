@@ -12,7 +12,8 @@ Routes:
 - `/dashboard` — the Resume Studio (protected by `RequireAuth`): 3-step wizard
   → generator → result → saved collection. Signed-out visitors are redirected
   to `/auth?returnTo=/dashboard`.
-- `/settings` — account settings (protected): change password.
+- `/settings` — account settings (protected): integrations (LLM / email /
+  Telegram connections with one-click live tests) and change password.
 - `/r/<slug>` — public, read-only view of a shared resume.
 
 Tech stack:
@@ -35,6 +36,9 @@ Use bun for the package manager.
 Key source files:
 - `src/convex/ai.ts` — tailoring + application-kit + job-URL import actions (rate-limited, input-capped, one retry)
 - `src/convex/aiUsage.ts` — daily per-session AI budget + structured AI run log
+- `src/convex/integrations.ts` — connections status + live tests for the LLM gateway, Resend email, and Telegram (feeds the `/settings` Connections card)
+- `src/convex/jobSearch.ts` — Job Radar search: 13 key-free sources, deterministic scoring, radius scan (geocoded distance filter), hourly watch sweep
+- `src/lib/geo.ts` — radius-chip parsing, haversine, Nominatim response parsing (pure; vitest-covered)
 - `src/convex/auth/usernamePassword.ts` — Tailorly's user name + password auth provider (sign up / sign in / email reset)
 - `src/convex/resumes.ts` — per-user profile upsert + saved resumes (de-duplicating save)
 - `src/pages/Auth.tsx` — sign in / create account / password reset page
@@ -81,9 +85,9 @@ Tailorly ships **user name + password authentication** via Convex Auth:
   only active sign-in path, so these pieces sit unused-but-loaded. They are
   left exactly as shipped (removing them risks platform-managed behavior);
   nothing in the app depends on them being configured.
-- `/settings` (protected) — account page: shows the signed-in user name +
-  email and lets the user change their password (verifies the current one,
-  re-hashes with the same scrypt scheme, signs out all other sessions).
+- `/settings` (protected) — account page: a **Connections** card (see below)
+  and the change-password form (verifies the current one, re-hashes with the
+  same scrypt scheme, signs out all other sessions).
 - `/dashboard` is wrapped in `RequireAuth` (src/components/RequireAuth.tsx),
   which preserves the intended path as `/auth?returnTo=...`.
 - All resume data is **scoped per signed-in user** (`userId` on
@@ -95,6 +99,39 @@ Tailorly ships **user name + password authentication** via Convex Auth:
 Note: reset emails go through `auth.freebuff.app` (configured by the platform).
 That service rejected reserved test domains (`example.com`) with an HTTP 500,
 so verify delivery with a real inbox; failures surface as a friendly error.
+
+# Connections & Integrations
+
+Tailorly talks to three external services. Keys live in the platform **Keys
+tab** (never in the client); the `/settings` Connections card shows live
+status and runs one-click tests against each:
+
+- **AI (LLM)** — the managed `VLY_INTEGRATION_KEY` gateway
+  (`vly.ai.completion`, `gpt-4o-mini`). The platform provisions the key, so
+  there is nothing to paste; "Test LLM" runs one real completion and shows
+  the reply. The daily 25-run session budget applies to tailoring, not the
+  test (which is a single call).
+- **Email (Resend)** — watch-alert delivery via `RESEND_API_KEY` (optional
+  `RESEND_FROM` overrides the sender). "Send test" delivers a real email to
+  the typed address and surfaces Resend's error verbatim on failure.
+- **Telegram** — `TELEGRAM_BOT_TOKEN`; "Check token" proves it via
+  `getUpdates` (the same resolver the radar watch form's "Find ID" uses).
+
+# Job Radar — radius scan
+
+The radar scans 13 key-free boards. Location handling:
+
+- Plain chips ("Remote", "Ohio", "43215") use any-of text matching
+  (`src/lib/matchScore.ts`): state names and abbreviations are
+  interchangeable, remote/worldwide postings always pass.
+- Radius chips ("Columbus, OH within 35mi") add a **distance filter**:
+  the server geocodes the place once (Nominatim via the `geoCache` table,
+  7-day TTL, shared across users), then keeps postings whose location
+  measures inside the radius (haversine). Postings that merely *name* the
+  place still pass commute-sized radii (≤35 mi); wider radii require cached
+  coordinates. If the geocoder is unreachable the scan degrades to plain
+  location matching — it never fails. Radius chips ride along in saved
+  watches, so the hourly sweep sweeps the same 35-mile circle.
 
 # Frontend Conventions
 

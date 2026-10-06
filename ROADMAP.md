@@ -621,6 +621,71 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twentieth pass (2026-10-06) — connections settings, 35-mile local scan, refresh button
+
+- **Connections settings ("connect emails and LLMs")**: new
+  **`convex/integrations.ts`** module surfaced as a *Connections* card on
+  `/settings` above the password form:
+  - **AI (LLM)**: status reads the platform-provisioned
+    `VLY_INTEGRATION_KEY` (no key to paste — the gateway is managed by the
+    deployment); the **Test LLM** button runs one real `vly.ai.completion`
+    round-trip and shows the model's reply. Chosen over a model picker
+    because `vly.ai.completion`'s contract here exposes `model` but the
+    platform bills/provisions one managed gateway — `gpt-4o-mini` stays the
+    supported model (same one every tailor/kit/extract/parse run uses).
+  - **Email (Resend)**: status shows whether `RESEND_API_KEY` is present in
+    the Keys tab; typing an address and hitting **Send test** delivers a
+    real Resend email (same `RESEND_FROM` fallback as watch alerts) and
+    surfaces the API's error verbatim on failure — exactly what a watch
+    digest will do.
+  - **Telegram**: status shows token presence + API reachability;
+    **Check token** reuses the existing `notify.resolveTelegramChat` to
+    prove the token works via `getUpdates`.
+  - A **Refresh** button re-reads all statuses; keys themselves stay in the
+    platform Keys tab (never client-visible), matching how `notify.ts`
+    already gates delivery.
+- **35-mile local scan**: location chips now carry a radius — type a place
+  and use the new **"within…"** select (10/25/35/50/100 mi) or the
+  **"within 35 mi (local)"** quick chip; radius chips render highlighted
+  with the Radar icon and travel with saved watches.
+  - **Server-side distance filter** in `jobSearch.gatherPostings`: chips are
+    parsed by `lib/geo.parseLocationChips` (comma fragments re-joined, so
+    "Columbus, OH within 35mi" survives the joined param); each chip's
+    origin is geocoded once via a new **`geoCache`** table
+    (`convex/geo.ts`, internal lookup/save, 7-day TTL) backed by
+    **OpenStreetMap Nominatim** — live-probed first: ZIPs (`postalcode`),
+    "City, ST", and small towns all resolve (Open-Meteo mishandles ZIPs, so
+    it was rejected). Postings then pass when their location string is
+    cached and haversine-measures inside the radius, or — commute-sized
+    radii (≤35 mi) only — when they name the chip's place but were never
+    geocoded (`mentionsPlace` fallback). Remote/anywhere postings always
+    pass; plain chips still apply any-of.
+  - **Graceful degradation**: geocoder down or a >35 mi chip without cached
+    coordinates falls back to the ordinary location matcher — a scan never
+    fails because of Nominatim (its 1 req/s policy is respected by the
+    cache: one row per place, shared across all users and the hourly watch
+    sweep, which sweeps radius watches the same way).
+- **Search refresh button**: a **Refresh** button (RefreshCw icon) next to
+  "Scan boards" re-runs the exact same search — upserts refresh scores,
+  descriptions, and locations in place (existing statuses untouched), so
+  "no listings came back" and stale boards are recoverable in one click.
+
+Verified: `convex dev --once` 0 (schema + 3 new modules pushed),
+`tsc -b --noEmit` 0, lint 0 (0/0), **143/143 tests** (13 new `geo.test.ts`
+cases: token/clamp parsing, comma-fragment rejoining, haversine sanity
+(Columbus→Cleveland ≈126 mi), Nominatim payload shape, fallback matcher).
+Live `convex run` smoke: `geo:lookup` miss → `geo:save` → hit returns cached
+coordinates; `searchJobs` correctly auth-gates from the CLI. Signed-in scan
+clicks (radius chip, refresh, connections tests) await browser use like the
+rest of the radar surface.
+
+Still open: **D5** (production build — platform rule); test-email delivery
+needs `RESEND_API_KEY` in the Keys tab; LLM test spends one completion
+(well inside the 25/day budget).
+
+
+---
+
 ## A. Correctness & robustness — fix first
 
 | # | Item | Detail |
