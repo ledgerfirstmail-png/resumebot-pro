@@ -63,7 +63,7 @@ function normalizeEmail(raw: unknown): string {
   return typeof raw === "string" ? raw.trim().toLowerCase() : "";
 }
 
-function validatePassword(password: string): void {
+export function validatePassword(password: string): void {
   if (password.length < 8) {
     throw new Error("Password must be at least 8 characters.");
   }

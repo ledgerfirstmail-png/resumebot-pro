@@ -3,7 +3,7 @@ import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/hooks/use-theme";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
-import { Home, LogOut, Moon, Sun } from "lucide-react";
+import { Home, LogOut, Moon, Settings as SettingsIcon, Sun } from "lucide-react";
 import { useNavigate } from "react-router";
 import { ClayButton } from "./ClayButton";
 
@@ -56,6 +56,10 @@ export function AppHeader() {
           >
             <LogOut />
             <span className="hidden sm:inline">Sign out</span>
+          </ClayButton>
+          <ClayButton variant="ghost" onClick={() => navigate("/settings")}>
+            <SettingsIcon />
+            <span className="hidden sm:inline">Settings</span>
           </ClayButton>
           <ClayButton variant="ghost" onClick={() => navigate("/")}>
             <Home />

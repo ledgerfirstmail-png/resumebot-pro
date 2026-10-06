@@ -586,6 +586,38 @@ still enforces auth (`"signed out"`), existing profile rows are untouched
 Still open: **D5** (production build — platform rule); share-link UI happy
 path awaits a saved resume.
 
+## Resolved in the nineteenth pass (2026-10-06) — change-password settings
+
+- **`/settings` account page (protected)**: shows the signed-in user name +
+  email, and a change-password form (current / new / confirm, show/hide
+  toggles, live mismatch hints). A **new `accounts:changePassword` action**
+  verifies the current password with the same lucia-Scrypt scheme the
+  credentials provider uses, re-hashes and stores the new one via
+  `modifyAccountCredentials`, and calls `invalidateSessions` keeping the
+  current session — other devices are signed out, stated plainly in the UI
+  (pass-6 follow-up: session management UI).
+  - Verifying directly with Scrypt (rather than the provider's
+    `retrieveAccount`) intentionally skips the sign-in failed-attempt rate
+    limiter: the action only runs for an authenticated user changing their
+    own password, who can always reset via email anyway (commented in code).
+  - Friendly failures live-verified signed-out: "You're signed out — sign in
+    to change your password."; also handled: wrong current password,
+    same-password rejection, under-8-char new password, and accounts without
+    a password (anonymous/email sign-ins).
+- **C8 ✅ — README** now documents the inert template scaffolding (`users.ts`,
+  `auth.config.ts`, auth tables, `ConvexAuthProvider`): why it stays
+  (platform-owned, do-not-modify) and that nothing depends on it, plus the
+  `/settings` and `/r/<slug>` routes in the routes list.
+
+Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
+**130/130 tests**, signed-out live probe above. The signed-in happy path
+reuses the exact primitives live-proven in the sixth pass (Scrypt hash/verify,
+`modifyAccountCredentials`, `invalidateSessions`); the UI flow itself awaits
+a manual click-through like the rest of the auth surface.
+
+Still open: **D5** (production build — platform rule); share-link UI happy
+path awaits a saved resume; reset-email delivery needs a real inbox.
+
 
 ---
 

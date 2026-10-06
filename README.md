@@ -12,6 +12,8 @@ Routes:
 - `/dashboard` — the Resume Studio (protected by `RequireAuth`): 3-step wizard
   → generator → result → saved collection. Signed-out visitors are redirected
   to `/auth?returnTo=/dashboard`.
+- `/settings` — account settings (protected): change password.
+- `/r/<slug>` — public, read-only view of a shared resume.
 
 Tech stack:
 - Vite
@@ -72,6 +74,16 @@ Tailorly ships **user name + password authentication** via Convex Auth:
   (the file header explicitly allows adding providers). `emailOtp.ts`,
   `auth.config.ts`, the `authTables`/`users` schema, and `ConvexAuthProvider`
   in `main.tsx` are untouched.
+- **Inert template scaffolding (why it's still here):** `users.ts`,
+  `auth.config.ts`, the auth tables in the schema, and the
+  `ConvexAuthProvider` wrapper in `main.tsx` come from the platform template
+  and are marked do-not-modify — Tailorly's username/password provider is the
+  only active sign-in path, so these pieces sit unused-but-loaded. They are
+  left exactly as shipped (removing them risks platform-managed behavior);
+  nothing in the app depends on them being configured.
+- `/settings` (protected) — account page: shows the signed-in user name +
+  email and lets the user change their password (verifies the current one,
+  re-hashes with the same scrypt scheme, signs out all other sessions).
 - `/dashboard` is wrapped in `RequireAuth` (src/components/RequireAuth.tsx),
   which preserves the intended path as `/auth?returnTo=...`.
 - All resume data is **scoped per signed-in user** (`userId` on

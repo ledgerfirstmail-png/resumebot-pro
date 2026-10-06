@@ -1,6 +1,14 @@
+import {
+  getAuthSessionId,
+  getAuthUserId,
+  invalidateSessions,
+  modifyAccountCredentials,
+} from "@convex-dev/auth/server";
+import { Scrypt } from "lucia";
 import { v } from "convex/values";
-import { internalQuery } from "./_generated/server";
-import { PROVIDER_ID } from "./auth/usernamePassword";
+import { internal } from "./_generated/api";
+import { action, internalQuery } from "./_generated/server";
+import { PROVIDER_ID, validatePassword } from "./auth/usernamePassword";
 
 /**
  * Internal lookups backing the username/password provider. Kept out of the
@@ -58,5 +66,76 @@ export const resetTarget = internalQuery({
       .unique();
     if (account === null) return null;
     return { accountId: account._id, username };
+  },
+});
+
+/**
+ * Change the signed-in user's own password (pass-6 follow-up: session
+ * management). Verifies the current password, hashes the new one with the
+ * same lucia-Scrypt scheme the credentials provider uses, and signs out
+ * every OTHER session, keeping the current one.
+ *
+ * Verifying with Scrypt directly (rather than the provider's
+ * `retrieveAccount`) intentionally skips the sign-in failed-attempt rate
+ * limiter: this only runs for an authenticated user changing their own
+ * password, and they can always reset it via email anyway.
+ */
+/**
+ * The signed-in user's password account: provider account id + the stored
+ * scrypt hash. null when the account has no password (anonymous/email).
+ */
+export const passwordAccount = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const account = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) =>
+        q.eq("userId", userId).eq("provider", PROVIDER_ID),
+      )
+      .unique();
+    if (!account?.secret) return null;
+    return {
+      providerAccountId: account.providerAccountId,
+      secret: account.secret,
+    };
+  },
+});
+
+export const changePassword = action({
+  args: { currentPassword: v.string(), newPassword: v.string() },
+  handler: async (ctx, { currentPassword, newPassword }) => {
+    const userId = await getAuthUserId(ctx);
+    const session = await getAuthSessionId(ctx);
+    if (userId === null || session === null) {
+      throw new Error("You're signed out — sign in to change your password.");
+    }
+    validatePassword(newPassword);
+    if (currentPassword === newPassword) {
+      throw new Error("That's already your password — pick a new one.");
+    }
+
+    const account = await ctx.runQuery(internal.accounts.passwordAccount, {
+      userId,
+    });
+    if (!account) {
+      throw new Error(
+        "This account doesn't use a password — sign in with your user name.",
+      );
+    }
+
+    const currentOk = await new Scrypt().verify(
+      account.secret,
+      currentPassword,
+    );
+    if (!currentOk) {
+      throw new Error("Your current password is incorrect.");
+    }
+
+    await modifyAccountCredentials(ctx, {
+      provider: PROVIDER_ID,
+      account: { id: account.providerAccountId, secret: newPassword },
+    });
+    await invalidateSessions(ctx, { userId, except: [session] });
+    return { ok: true };
   },
 });
