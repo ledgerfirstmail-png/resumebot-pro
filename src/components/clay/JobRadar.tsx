@@ -18,9 +18,10 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, Fragment, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getSessionId } from "@/lib/session";
+import { US_STATE_NAMES } from "@/lib/matchScore";
 import type { ResumeProfileData } from "@/types/resume";
 
 type JobMatch = Doc<"jobMatches">;
@@ -91,6 +92,8 @@ export function JobRadar({
   const [locDraft, setLocDraft] = useState("");
   // Results-side filter over the locations actually saved on this board.
   const [locFilter, setLocFilter] = useState("");
+  // View mode: score order (default) or bucketed by city/state/town.
+  const [groupByLocation, setGroupByLocation] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   // Auto-scan lifecycle: flipped only from promise callbacks (never
   // synchronously inside the effect) so the empty state can show "pulling
@@ -147,6 +150,37 @@ export function JobRadar({
       m.score >= minScore &&
       (locFilter === "" || m.location.trim().toLowerCase() === locFilter),
   );
+
+  // "By location" view: bucket the filtered list so every city/state/town
+  // reads as a "hiring here" block, ordered by how many listings it holds.
+  type LocGroup = { key: string; label: string; items: JobMatch[] };
+  const locationGroups: LocGroup[] = [];
+  const groupFirstIds = new Map<string, LocGroup>();
+  if (groupByLocation) {
+    const byKey = new Map<string, LocGroup>();
+    for (const m of visible) {
+      const label = m.location.trim() || "Unspecified";
+      const key = label.toLowerCase();
+      const group = byKey.get(key);
+      if (group) group.items.push(m);
+      else {
+        const created: LocGroup = { key, label, items: [m] };
+        byKey.set(key, created);
+        locationGroups.push(created);
+      }
+    }
+    locationGroups.sort(
+      (a, b) =>
+        b.items.length - a.items.length || a.label.localeCompare(b.label),
+    );
+    for (const group of locationGroups) {
+      const first = group.items[0];
+      if (first) groupFirstIds.set(first._id, group);
+    }
+  }
+  const displayList = groupByLocation
+    ? locationGroups.flatMap((g) => g.items)
+    : visible;
   // Spinner/copy driver: a manual scan, or the one silent first scan.
   const searching =
     isSearching ||
@@ -487,10 +521,12 @@ export function JobRadar({
                   if (locDraft.trim().length > 0) addLocation(locDraft);
                 }}
                 placeholder={
-                  locations.length === 0 ? "Location (optional)" : "Add location"
+                  locations.length === 0
+                    ? "City, state or town (optional)"
+                    : "Add city, state or town"
                 }
                 className="min-w-16 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
-                aria-label="Add a location — comma or Enter adds it"
+                aria-label="Add a city, state, or town — comma or Enter adds it"
               />
             </div>
             <ClayButton
@@ -532,6 +568,21 @@ export function JobRadar({
                 </button>
               );
             })}
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) addLocation(e.target.value);
+              }}
+              aria-label="Add a US state to the scan"
+              className="cursor-pointer rounded-full bg-card px-2 py-1 text-xs font-semibold text-muted-foreground ring-1 ring-border/60 hover:text-foreground"
+            >
+              <option value="">+ State…</option>
+              {US_STATE_NAMES.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
             {locations.length > 0 && (
               <button
                 type="button"
@@ -613,17 +664,56 @@ export function JobRadar({
                   ))}
                 </select>
               )}
+              <div className="flex items-center gap-0.5 rounded-full bg-card/70 p-0.5 ring-1 ring-border/60">
+                <button
+                  type="button"
+                  onClick={() => setGroupByLocation(false)}
+                  aria-pressed={!groupByLocation}
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    groupByLocation
+                      ? "text-muted-foreground hover:text-foreground"
+                      : "bg-primary/15 text-primary"
+                  }`}
+                >
+                  By match
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGroupByLocation(true)}
+                  aria-pressed={groupByLocation}
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    groupByLocation
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  By location
+                </button>
+              </div>
               <span className="text-xs font-semibold text-muted-foreground">
-                {visible.length} of {matches.length} saved · sorted by match
+                {visible.length} of {matches.length} saved ·{" "}
+                {groupByLocation ? "grouped by city/state" : "sorted by match"}
               </span>
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-          {visible.map((match) => {
+          {displayList.map((match) => {
             const isSelected = selected.has(match._id);
+            const groupHead = groupFirstIds.get(match._id);
             return (
+              <Fragment key={match._id}>
+                {groupHead && (
+                  <div className="col-span-2 flex items-center gap-2 pt-2">
+                    <span className="clay-chip flex max-w-72 items-center gap-1.5 truncate px-3 py-1 text-xs font-bold">
+                      <MapPin className="size-3 shrink-0" />
+                      {groupHead.label}
+                    </span>
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      {groupHead.items.length} hiring
+                    </span>
+                  </div>
+                )}
               <ClayCard
-                key={match._id}
                 className={`flex flex-col gap-3 ${isSelected ? "ring-2 ring-primary/50" : ""}`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -770,6 +860,7 @@ export function JobRadar({
                   </a>
                 </div>
               </ClayCard>
+              </Fragment>
             );
           })}
           </div>

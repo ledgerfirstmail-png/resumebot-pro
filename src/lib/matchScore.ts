@@ -215,10 +215,113 @@ export function locationTerms(raw: string | null | undefined): string[] {
 /** Listings open to the whole world pass any location filter. */
 const ANYWHERE_RE = /\bremote\b|worldwide|anywhere|global|\bintl\b/;
 
+/** US states (lowercase name → abbreviation), alphabetical; DC included. */
+export const US_STATES: Record<string, string> = {
+  alabama: "al",
+  alaska: "ak",
+  arizona: "az",
+  arkansas: "ar",
+  california: "ca",
+  colorado: "co",
+  connecticut: "ct",
+  delaware: "de",
+  "district of columbia": "dc",
+  florida: "fl",
+  georgia: "ga",
+  hawaii: "hi",
+  idaho: "id",
+  illinois: "il",
+  indiana: "in",
+  iowa: "ia",
+  kansas: "ks",
+  kentucky: "ky",
+  louisiana: "la",
+  maine: "me",
+  maryland: "md",
+  massachusetts: "ma",
+  michigan: "mi",
+  minnesota: "mn",
+  mississippi: "ms",
+  missouri: "mo",
+  montana: "mt",
+  nebraska: "ne",
+  nevada: "nv",
+  "new hampshire": "nh",
+  "new jersey": "nj",
+  "new mexico": "nm",
+  "new york": "ny",
+  "north carolina": "nc",
+  "north dakota": "nd",
+  ohio: "oh",
+  oklahoma: "ok",
+  oregon: "or",
+  pennsylvania: "pa",
+  "rhode island": "ri",
+  "south carolina": "sc",
+  "south dakota": "sd",
+  tennessee: "tn",
+  texas: "tx",
+  utah: "ut",
+  vermont: "vt",
+  virginia: "va",
+  washington: "wa",
+  "west virginia": "wv",
+  wisconsin: "wi",
+  wyoming: "wy",
+};
+
+/** State names in alphabetical order (display-cased) — the "add a state" picker. */
+export const US_STATE_NAMES = Object.keys(US_STATES).map((name) =>
+  name
+    .replace(/\b[a-z]/g, (c) => c.toUpperCase())
+    .replace(/\bOf\b/g, "of"), // "District of Columbia", not "District Of Columbia"
+);
+
+const STATE_BY_ABBR = new Map(
+  Object.entries(US_STATES).map(([name, abbr]) => [abbr, name]),
+);
+const US_ABBR_TOKENS = new Set(Object.values(US_STATES));
+
+/** Terms that mean "anywhere in the United States". */
+const USA_TERMS = new Set([
+  "usa",
+  "us",
+  "u.s.",
+  "u.s.a",
+  "america",
+  "united states",
+  "united states of america",
+]);
+
+/** A posting locates a US place when it names a state or the country. */
+function namesUsPlace(pl: string, tokens: string[]): boolean {
+  if (/\busa\b|\bunited states\b|\bamerica\b/.test(pl)) return true;
+  if (tokens.some((t) => US_ABBR_TOKENS.has(t))) return true;
+  // Full state names without an abbreviation ("Austin, Texas",
+  // "Portland, Oregon") — substring check so multi-word states like
+  // "new hampshire" match regardless of tokenization.
+  return Object.keys(US_STATES).some((name) => pl.includes(name));
+}
+
+/** Expand a location term with its US-state counterpart ("texas" ↔ "tx"). */
+function stateAliases(term: string): string[] {
+  const out = [term];
+  const abbr = US_STATES[term];
+  if (abbr) out.push(abbr);
+  const full = STATE_BY_ABBR.get(term);
+  if (full) out.push(full);
+  return out;
+}
+
 /**
  * A posting passes a (possibly multi-term) location filter when it is
- * work-from-anywhere or mentions any of the requested terms — any-of, so
- * picking several locations widens the scan instead of narrowing it.
+ * work-from-anywhere or names any requested place — any-of, so picking
+ * several locations widens the scan instead of narrowing it.
+ *
+ * US-aware: state names and abbreviations are interchangeable ("Texas"
+ * matches "Austin, TX"), short codes must match whole tokens ("ca" never
+ * matches inside "Remote"), and a USA term matches any US place — so the
+ * USA chip surfaces city/state listings like "Dearborn, MI".
  */
 export function matchesLocation(
   postLocation: string,
@@ -227,5 +330,13 @@ export function matchesLocation(
   if (terms.length === 0) return true;
   const pl = postLocation.toLowerCase();
   if (ANYWHERE_RE.test(pl)) return true;
-  return terms.some((term) => pl.includes(term));
+  const tokens = pl.split(/[^a-z0-9]+/).filter(Boolean);
+  return terms.some((term) => {
+    if (USA_TERMS.has(term)) return namesUsPlace(pl, tokens);
+    return stateAliases(term).some((candidate) =>
+      candidate.length >= 3
+        ? pl.includes(candidate)
+        : tokens.includes(candidate),
+    );
+  });
 }

@@ -4,6 +4,7 @@ import {
   matchProfileToPosting,
   matchesLocation,
   tokenize,
+  US_STATE_NAMES,
   type MatchProfile,
   type MatchPosting,
 } from "../matchScore";
@@ -184,5 +185,55 @@ describe("matchesLocation", () => {
   it("is case-insensitive on both sides", () => {
     expect(matchesLocation("BERLIN", locationTerms("berlin"))).toBe(true);
     expect(matchesLocation("remote", locationTerms("Berlin"))).toBe(true);
+  });
+});
+
+describe("matchesLocation (US states & cities)", () => {
+  it("matches a state name against city, ST listings", () => {
+    expect(matchesLocation("Austin, TX", locationTerms("Texas"))).toBe(true);
+    expect(matchesLocation("Dearborn, MI", locationTerms("Michigan"))).toBe(
+      true,
+    );
+    expect(matchesLocation("Austin, TX", locationTerms("California"))).toBe(
+      false,
+    );
+  });
+
+  it("matches a state abbreviation as a whole token, never inside words", () => {
+    expect(matchesLocation("Austin, TX", locationTerms("TX"))).toBe(true);
+    // Whole-token only: "me" inside "Melbourne" never counts as Maine.
+    expect(matchesLocation("Melbourne", locationTerms("ME"))).toBe(false);
+    expect(matchesLocation("Games, CA", locationTerms("ME"))).toBe(false);
+    expect(matchesLocation("London, UK", locationTerms("UK"))).toBe(true);
+  });
+
+  it("a USA term matches any US place but not foreign ones", () => {
+    expect(matchesLocation("Dearborn, MI", locationTerms("USA"))).toBe(true);
+    expect(matchesLocation("Austin, TX", locationTerms("United States"))).toBe(
+      true,
+    );
+    // Full state names, no abbreviation required.
+    expect(matchesLocation("Austin, Texas", locationTerms("USA"))).toBe(true);
+    expect(matchesLocation("Portland, Oregon", locationTerms("USA"))).toBe(
+      true,
+    );
+    expect(matchesLocation("Berlin, Germany", locationTerms("USA"))).toBe(
+      false,
+    );
+    expect(matchesLocation("Manchester, England", locationTerms("USA"))).toBe(
+      false,
+    );
+  });
+
+  it("still lets work-from-anywhere listings through", () => {
+    expect(matchesLocation("Remote", locationTerms("Texas"))).toBe(true);
+    expect(matchesLocation("Worldwide", locationTerms("Texas"))).toBe(true);
+  });
+
+  it("exports all 51 picker names (50 states + DC)", () => {
+    expect(US_STATE_NAMES).toHaveLength(51);
+    expect(US_STATE_NAMES).toContain("Texas");
+    expect(US_STATE_NAMES).toContain("District of Columbia");
+    expect(US_STATE_NAMES[0]).toBe("Alabama");
   });
 });

@@ -374,6 +374,42 @@ and emits a valid PDF.
 Still open: **D5** (production build — platform rule; jsPDF now lands in the
 client graph, so it's flagged for the eventual one-time build).
 
+## Resolved in the fourteenth pass (2026-10-06) — USA listings by state & local hiring
+
+- **Two US-focused boards** added to `gatherPostings` (now five key-free
+  sources, all `Promise.allSettled`): **The Muse** (`/api/public/jobs`) and
+  **Jobicy** (`/api/v2/remote-jobs`). These are the local-hiring sources —
+  Muse publishes duty locations per job ("Dearborn, MI", "Austin, TX"),
+  Jobicy's `jobGeo` carries US regions. Both were probed live against the
+  real endpoints before wiring; names array is
+  `["remotive","remoteok","arbeitnow","muse","jobicy"]`.
+- **US-aware location matching** in `src/lib/matchScore.ts`: exported
+  `US_STATES` (50 states + DC, name ↔ abbreviation), `US_STATE_NAMES`
+  (alphabetical display names for the picker), `USA_TERMS`, plus
+  `stateAliases()`/`namesUsPlace()` inside a rewritten `matchesLocation()` —
+  a state name matches "Austin, TX" and vice versa, short codes ("ME",
+  "CA") only match **whole tokens** (never inside "Melbourne"/
+  "Games"), and a USA term ("USA", "United States"…) matches any US
+  place while foreign cities stay out. Remote/worldwide listings still pass
+  every filter.
+- **State picker + city/state/town entry**: the radar's location chip input
+  placeholder now reads "City, state or town", and the quick-pick row gained
+  a **+ State…** select listing all 51 names — pick one and it becomes a
+  normal removable chip, so a scan can target any US state or any local
+  city/town by name.
+- **By-location grouping** in results: a **By match / By location** toggle
+  in the results header (aria-pressed) buckets the grid by the listing's
+  exact location — largest group first — with a MapPin group heading
+  ("{n} hiring") before each run of cards, so the scan reads like a list of
+  businesses hiring per city/state/town. Header subtitle flips between
+  "grouped by city/state" and "sorted by match".
+
+Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
+**75/75 tests** (5 new — state name↔city/ST, whole-token codes, USA term vs
+foreign, anywhere pass, 51-name picker).
+
+Still open: **D5** (production build — platform rule).
+
 
 ---
 

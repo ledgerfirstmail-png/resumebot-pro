@@ -18,8 +18,9 @@ import type { Id } from "./_generated/dataModel";
 
 /**
  * Job Radar search (feature: "find employers that are hiring and score the
- * resume for a match"). Aggregates three key-free job boards, filters to the
- * query, and scores every listing against the owner's profile with the pure
+ * resume for a match"). Aggregates five key-free job boards (incl. US
+ * city/state sources for local hiring), filters to the query and locations,
+ * and scores every listing against the owner's profile with the pure
  * deterministic matcher — no AI credits spent on search. The hourly watch
  * sweep reuses the same pipeline and pushes new matches out by email and
  * Telegram (see notify.ts).
@@ -140,6 +141,88 @@ async function fetchRemoteOk(): Promise<RawPosting[]> {
   });
 }
 
+/**
+ * The Muse — US-heavy local hiring (on-site city/state duty locations like
+ * "Dearborn, MI"), key-free. This is what makes the radar list businesses by
+ * city, state, or town instead of only remote-friendly regions.
+ */
+async function fetchTheMuse(): Promise<RawPosting[]> {
+  const data = (await fetchJson(
+    "https://www.themuse.com/api/public/jobs?page=1",
+  )) as { results?: unknown[] };
+  return (data.results ?? []).flatMap((entry) => {
+    const j = (entry ?? {}) as Record<string, unknown>;
+    const title = str(j.name);
+    const url = str(
+      (j.refs ?? null) instanceof Object
+        ? ((j.refs as Record<string, unknown>) ?? {}).landing_page
+        : undefined,
+    );
+    const id = j.id === undefined || j.id === null ? "" : String(j.id);
+    if (!title || !url) return [];
+    const locations = Array.isArray(j.locations)
+      ? (j.locations as unknown[])
+          .map((l) => str((l as Record<string, unknown> | null)?.name))
+          .filter(Boolean)
+      : [];
+    const categories = Array.isArray(j.categories)
+      ? (j.categories as unknown[])
+          .map((c) => str((c as Record<string, unknown> | null)?.name))
+          .filter(Boolean)
+      : [];
+    const company = (j.company ?? null) as Record<string, unknown> | null;
+    return [
+      {
+        source: "muse",
+        externalId: id || url,
+        title,
+        company: str(company?.name) || "Unknown company",
+        description: htmlToText(str(j.contents)).slice(
+          0,
+          MAX_DESCRIPTION_CHARS,
+        ),
+        url,
+        location: locations.join(", ") || "Unspecified",
+        postedAt: parseDate(j.publication_date),
+        tags: categories,
+      },
+    ];
+  });
+}
+
+/** Jobicy — remote feed with country-level geo ("USA", "Worldwide", …). */
+async function fetchJobicy(): Promise<RawPosting[]> {
+  const data = (await fetchJson(
+    "https://jobicy.com/api/v2/remote-jobs?count=40",
+  )) as { jobs?: unknown[]; success?: boolean };
+  if (data.success === false) return [];
+  return (data.jobs ?? []).flatMap((entry) => {
+    const j = (entry ?? {}) as Record<string, unknown>;
+    const title = str(j.jobTitle);
+    const url = str(j.url);
+    const id = j.id === undefined || j.id === null ? "" : String(j.id);
+    if (!title || !url) return [];
+    const jobType = str(j.jobType);
+    return [
+      {
+        source: "jobicy",
+        externalId: id || url,
+        title,
+        company:
+          str(j.companyName) || str(j.company) || "Unknown company",
+        description: htmlToText(str(j.jobDescription)).slice(
+          0,
+          MAX_DESCRIPTION_CHARS,
+        ),
+        url,
+        location: str(j.jobGeo) || "Remote",
+        postedAt: parseDate(j.pubDate),
+        tags: jobType ? [jobType] : [],
+      },
+    ];
+  });
+}
+
 /** Arbeitnow — general job board feed, filtered locally by query. */
 async function fetchArbeitnow(): Promise<RawPosting[]> {
   const data = (await fetchJson(
@@ -182,8 +265,10 @@ async function gatherPostings(
     fetchRemotive(query),
     fetchRemoteOk(),
     fetchArbeitnow(),
+    fetchTheMuse(),
+    fetchJobicy(),
   ]);
-  const names = ["remotive", "remoteok", "arbeitnow"];
+  const names = ["remotive", "remoteok", "arbeitnow", "muse", "jobicy"];
   const errors: string[] = [];
   const raw: RawPosting[] = [];
   settled.forEach((result, i) => {
