@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  locationTerms,
   matchProfileToPosting,
+  matchesLocation,
   tokenize,
   type MatchProfile,
   type MatchPosting,
@@ -132,5 +134,55 @@ describe("matchProfileToPosting", () => {
     const result = matchProfileToPosting(engineer, longPosting);
     expect(result.matchedKeywords.length).toBeLessThanOrEqual(10);
     expect(result.missingKeywords.length).toBeLessThanOrEqual(12);
+  });
+});
+
+describe("locationTerms", () => {
+  it("splits a multi-location string into normalized terms", () => {
+    expect(locationTerms("Remote, Berlin")).toEqual(["remote", "berlin"]);
+    expect(locationTerms(" New  York ; USA | London ")).toEqual([
+      "new york",
+      "usa",
+      "london",
+    ]);
+  });
+
+  it("trims, lowercases, and de-duplicates case-insensitively", () => {
+    expect(locationTerms("Berlin, berlin, BERLIN")).toEqual(["berlin"]);
+  });
+
+  it("drops empty and single-character fragments", () => {
+    expect(locationTerms(" , ; a ,, b ")).toEqual([]);
+    expect(locationTerms(undefined)).toEqual([]);
+    expect(locationTerms("")).toEqual([]);
+  });
+});
+
+describe("matchesLocation", () => {
+  it("passes everything when no locations are requested", () => {
+    expect(matchesLocation("Berlin, Germany", [])).toBe(true);
+    expect(matchesLocation("Unspecified", locationTerms(undefined))).toBe(
+      true,
+    );
+  });
+
+  it("matches any requested term (widens with more locations)", () => {
+    const terms = locationTerms("Berlin, London");
+    expect(matchesLocation("Berlin, Germany", terms)).toBe(true);
+    expect(matchesLocation("London, UK", terms)).toBe(true);
+    expect(matchesLocation("Austin, TX", terms)).toBe(false);
+  });
+
+  it("lets work-from-anywhere listings pass any location filter", () => {
+    const terms = locationTerms("Germany");
+    expect(matchesLocation("Remote", terms)).toBe(true);
+    expect(matchesLocation("Worldwide", terms)).toBe(true);
+    expect(matchesLocation("Anywhere on earth", terms)).toBe(true);
+    expect(matchesLocation("Global (UTC±3)", terms)).toBe(true);
+  });
+
+  it("is case-insensitive on both sides", () => {
+    expect(matchesLocation("BERLIN", locationTerms("berlin"))).toBe(true);
+    expect(matchesLocation("remote", locationTerms("Berlin"))).toBe(true);
   });
 });

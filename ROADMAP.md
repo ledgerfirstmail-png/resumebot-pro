@@ -316,6 +316,32 @@ Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
 **54/54 tests**, live probes on real board data (escaped markup stripped ✓,
 German filler gone ✓, relevance ordering preserved).
 
+## Resolved in the twelfth pass (2026-10-06) — "Add locations"
+
+- **Multi-location scan**: the radar's single free-text Location field became
+  a **chip input** — type a place and hit Enter/comma (or paste
+  "Berlin, London") to add it, ×/Backspace removes, capped at 8 with
+  case-insensitive de-dupe. A **quick-pick row** under the scan form offers
+  Remote / Worldwide / Europe / USA / Germany / United Kingdom plus the most
+  common locations from the user's own saved board (derived client-side),
+  with a Clear action that also resets the results filter.
+- **Any-of server filter**: new pure helpers `locationTerms` +
+  `matchesLocation` in `src/lib/matchScore.ts` — the comma/semicolon string
+  splits into normalized terms and a posting passes when it mentions **any**
+  requested term or is open to the whole world (remote/worldwide/anywhere/
+  global/intl). `gatherPostings` now uses them, so saved watches can carry
+  several locations and sweep the same way.
+- **Results location filter**: the "Job listings" header gained a select
+  listing every location actually saved on the board with counts
+  ("All locations · Remote · 42 · Berlin · 12 …"), grouped case-insensitively;
+  it filters the visible grid exactly and the empty state explains when a
+  location has no saved listings.
+- **Watch rows** show their location chip (MapPin) beside the query, so a
+  saved alert reads query + location + threshold at a glance.
+
+Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
+**61/61 tests** (7 new — `locationTerms`/`matchesLocation` coverage).
+
 
 ---
 

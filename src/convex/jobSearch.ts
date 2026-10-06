@@ -4,7 +4,9 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { htmlToText } from "../lib/aiParse";
 import {
+  locationTerms,
   matchProfileToPosting,
+  matchesLocation,
   STOPWORDS,
   tokenize,
   type MatchProfile,
@@ -215,16 +217,11 @@ async function gatherPostings(
     });
   }
 
-  // Location: explicit city/country match, or the listing is work-from-anywhere.
-  const loc = (location ?? "").trim().toLowerCase();
-  if (loc) {
-    postings = postings.filter((p) => {
-      const pl = p.location.toLowerCase();
-      return (
-        pl.includes(loc) ||
-        /\bremote\b|worldwide|anywhere|global|\bintl\b/.test(pl)
-      );
-    });
+  // Locations: the user may pick several at once — a listing passes when it
+  // is open to the whole world or mentions ANY requested term.
+  const locTerms = locationTerms(location);
+  if (locTerms.length > 0) {
+    postings = postings.filter((p) => matchesLocation(p.location, locTerms));
   }
 
   return { postings, errors };

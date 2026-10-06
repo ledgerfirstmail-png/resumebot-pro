@@ -10,13 +10,15 @@ import {
   ExternalLink,
   Loader2,
   Mail,
+  MapPin,
   Radar,
   Search,
   Send,
   Trash2,
   Wand2,
+  X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getSessionId } from "@/lib/session";
 import type { ResumeProfileData } from "@/types/resume";
@@ -44,6 +46,16 @@ function scoreClasses(score: number): string {
   if (score >= 50) return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
   return "bg-rose-500/15 text-rose-600 dark:text-rose-400";
 }
+
+/** Quick-pick locations offered under the scan form (boards are remote-first). */
+const LOCATION_PRESETS = [
+  "Remote",
+  "Worldwide",
+  "Europe",
+  "USA",
+  "Germany",
+  "United Kingdom",
+];
 
 function daysAgo(ts?: number): string {
   if (!ts) return "";
@@ -74,7 +86,11 @@ export function JobRadar({
   const deleteWatch = useMutation(api.jobs.deleteWatch);
 
   const [query, setQuery] = useState("");
-  const [location, setLocation] = useState("");
+  // Multi-location scan: the chosen chips + the live draft typed in the field.
+  const [locations, setLocations] = useState<string[]>([]);
+  const [locDraft, setLocDraft] = useState("");
+  // Results-side filter over the locations actually saved on this board.
+  const [locFilter, setLocFilter] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   // Auto-scan lifecycle: flipped only from promise callbacks (never
   // synchronously inside the effect) so the empty state can show "pulling
@@ -95,7 +111,42 @@ export function JobRadar({
   const [isResolvingChat, setIsResolvingChat] = useState(false);
 
   const hasProfile = profile !== null && profile.title.trim().length > 0;
-  const visible = (matches ?? []).filter((m) => m.score >= minScore);
+
+  // Distinct locations across saved listings (label + count) — powers the
+  // results filter and the quick-pick suggestions.
+  const locationOptions = useMemo(() => {
+    const byKey = new Map<string, { label: string; count: number }>();
+    for (const m of matches ?? []) {
+      const label = m.location.trim();
+      if (!label) continue;
+      const key = label.toLowerCase();
+      const prev = byKey.get(key);
+      if (prev) prev.count += 1;
+      else byKey.set(key, { label, count: 1 });
+    }
+    return [...byKey.entries()]
+      .map(([key, option]) => ({ key, ...option }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  }, [matches]);
+
+  /** Presets first, then the most common locations from the saved board. */
+  const suggestions = useMemo(() => {
+    const seen = new Set(LOCATION_PRESETS.map((p) => p.toLowerCase()));
+    const fromBoard: string[] = [];
+    for (const option of locationOptions) {
+      if (seen.has(option.key)) continue;
+      seen.add(option.key);
+      fromBoard.push(option.label);
+      if (fromBoard.length === 4) break;
+    }
+    return [...LOCATION_PRESETS, ...fromBoard];
+  }, [locationOptions]);
+
+  const visible = (matches ?? []).filter(
+    (m) =>
+      m.score >= minScore &&
+      (locFilter === "" || m.location.trim().toLowerCase() === locFilter),
+  );
   // Spinner/copy driver: a manual scan, or the one silent first scan.
   const searching =
     isSearching ||
@@ -139,6 +190,35 @@ export function JobRadar({
       .finally(() => setAutoScanDone(true));
   }, [matches, hasProfile, searchJobs]);
 
+  /** Location chips — the set of places the next scan targets. */
+  const addLocation = (raw: string) => {
+    const value = raw.trim().replace(/\s+/g, " ").slice(0, 40);
+    setLocDraft("");
+    if (value.length < 2) return;
+    if (locations.some((l) => l.toLowerCase() === value.toLowerCase())) return;
+    if (locations.length >= 8) {
+      toast.info("Up to 8 locations at a time — remove one to add another.");
+      return;
+    }
+    setLocations([...locations, value]);
+  };
+
+  const removeLocation = (value: string) =>
+    setLocations((prev) =>
+      prev.filter((l) => l.toLowerCase() !== value.toLowerCase()),
+    );
+
+  const toggleLocation = (value: string) => {
+    if (locations.some((l) => l.toLowerCase() === value.toLowerCase())) {
+      removeLocation(value);
+    } else {
+      addLocation(value);
+    }
+  };
+
+  /** Comma-joined locations consumed by the scan action and saved watches. */
+  const locationParam = locations.join(", ") || undefined;
+
   /** Feature 1 — find employers hiring right now, scored against the profile. */
   const handleSearch = async () => {
     if (!hasProfile) {
@@ -150,7 +230,7 @@ export function JobRadar({
     try {
       const out = await searchJobs({
         query: query.trim(),
-        location: location.trim() || undefined,
+        location: locationParam,
       });
       if (out.searched === 0) {
         toast.info("No listings came back — try a broader search term.");
@@ -195,7 +275,7 @@ export function JobRadar({
       // Re-scan in the background: scores refresh and new employers roll in.
       void searchJobs({
         query: query.trim(),
-        location: location.trim() || undefined,
+        location: locationParam,
       }).catch(() => undefined);
       onTailored(
         {
@@ -287,7 +367,7 @@ export function JobRadar({
     try {
       await saveWatch({
         query: query.trim(),
-        location: location.trim() || undefined,
+        location: locationParam,
         minScore,
         email: watchEmail.trim() || undefined,
         emailEnabled: watchEmailOn,
@@ -363,14 +443,54 @@ export function JobRadar({
                 aria-label="Search job titles or skills"
               />
             </div>
-            <div className="clay-inset flex h-11 items-center gap-2 rounded-2xl px-4 sm:w-56">
+            <div className="clay-inset flex min-h-11 flex-1 flex-wrap items-center gap-1.5 rounded-2xl px-3">
+              <MapPin className="size-4 shrink-0 text-muted-foreground" />
+              {locations.map((loc) => (
+                <span
+                  key={loc}
+                  className="clay-chip flex items-center gap-1 py-0.5 pl-2.5 pr-1.5 text-xs font-bold"
+                >
+                  {loc}
+                  <button
+                    type="button"
+                    onClick={() => removeLocation(loc)}
+                    aria-label={`Remove ${loc} location`}
+                    className="rounded-full text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
               <input
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="Location (optional)"
-                className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
-                aria-label="Location filter"
+                value={locDraft}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (/[,;|]/.test(value)) {
+                    const parts = value.split(/[,;|]+/);
+                    const rest = parts.pop() ?? "";
+                    for (const part of parts) addLocation(part);
+                    setLocDraft(rest);
+                  } else {
+                    setLocDraft(value);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (locDraft.trim().length > 0) addLocation(locDraft);
+                    else handleSearch();
+                  } else if (e.key === "Backspace" && locDraft === "") {
+                    setLocations((prev) => prev.slice(0, -1));
+                  }
+                }}
+                onBlur={() => {
+                  if (locDraft.trim().length > 0) addLocation(locDraft);
+                }}
+                placeholder={
+                  locations.length === 0 ? "Location (optional)" : "Add location"
+                }
+                className="min-w-16 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
+                aria-label="Add a location — comma or Enter adds it"
               />
             </div>
             <ClayButton
@@ -385,6 +505,45 @@ export function JobRadar({
               )}
               {searching ? "Scanning…" : "Scan boards"}
             </ClayButton>
+          </div>
+
+          {/* Location quick-picks */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              <MapPin className="size-3.5" /> Locations
+            </span>
+            {suggestions.map((s) => {
+              const active = locations.some(
+                (l) => l.toLowerCase() === s.toLowerCase(),
+              );
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => toggleLocation(s)}
+                  aria-pressed={active}
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 transition-colors ${
+                    active
+                      ? "bg-primary/15 text-primary ring-primary/40"
+                      : "text-muted-foreground ring-border/60 hover:bg-card hover:text-foreground"
+                  }`}
+                >
+                  {s}
+                </button>
+              );
+            })}
+            {locations.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLocations([]);
+                  setLocFilter("");
+                }}
+                className="px-1 text-xs font-semibold text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Clear
+              </button>
+            )}
           </div>
 
           {/* Match threshold */}
@@ -429,16 +588,35 @@ export function JobRadar({
               ? "Pulling the latest listings from the boards…"
               : matches.length === 0
                 ? "Nothing scanned yet — run your first search above to pull live openings."
-                : `No listings at or above ${minScore}% right now — lower the bar or scan again.`}
+                : locFilter
+                  ? "No saved listings in that location — switch back to “All locations” or scan again."
+                  : `No listings at or above ${minScore}% right now — lower the bar or scan again.`}
           </p>
         </ClayCard>
       ) : (
         <>
-          <div className="flex items-baseline justify-between gap-2 px-1">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <h2 className="clay-title text-lg">Job listings</h2>
-            <span className="text-xs font-semibold text-muted-foreground">
-              {visible.length} of {matches.length} saved · sorted by match
-            </span>
+            <div className="flex items-center gap-2">
+              {locationOptions.length > 1 && (
+                <select
+                  value={locFilter}
+                  onChange={(e) => setLocFilter(e.target.value)}
+                  className="clay-inset h-8 max-w-56 rounded-xl px-2 text-xs font-semibold outline-none"
+                  aria-label="Filter listings by location"
+                >
+                  <option value="">All locations</option>
+                  {locationOptions.map((opt) => (
+                    <option key={opt.key} value={opt.key}>
+                      {opt.label} · {opt.count}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <span className="text-xs font-semibold text-muted-foreground">
+                {visible.length} of {matches.length} saved · sorted by match
+              </span>
+            </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
           {visible.map((match) => {
@@ -651,7 +829,7 @@ export function JobRadar({
           <div className="mt-4 flex flex-col gap-3 rounded-2xl bg-card/70 p-4 ring-1 ring-border/60">
             <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
               Watching “{query.trim() || "all live openings”"}
-              {location.trim() ? ` in ${location.trim()}` : ""}
+              {locations.length > 0 ? ` in ${locations.join(", ")}` : ""}
             </p>
 
             <label className="flex items-center gap-2 text-sm">
@@ -730,6 +908,12 @@ export function JobRadar({
                 className="flex flex-wrap items-center gap-3 rounded-2xl bg-card/70 px-4 py-3 text-sm ring-1 ring-border/60"
               >
                 <span className="font-semibold">“{watch.query}”</span>
+                {watch.location && (
+                  <span className="clay-chip flex items-center gap-1 px-2 py-0.5 text-xs font-bold">
+                    <MapPin className="size-3" />
+                    {watch.location}
+                  </span>
+                )}
                 <span className="clay-chip px-2 py-0.5 text-xs font-bold">
                   ≥ {watch.minScore}%
                 </span>

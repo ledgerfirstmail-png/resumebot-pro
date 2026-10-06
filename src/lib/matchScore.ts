@@ -196,3 +196,36 @@ export function matchProfileToPosting(
       .slice(0, 12),
   };
 }
+
+/**
+ * Location filtering (radar "Add locations"): a search may carry several
+ * locations at once ("Remote, Berlin"), so the stored comma/semicolon string
+ * is split into normalized terms the boards are matched against.
+ */
+export function locationTerms(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const terms = new Set<string>();
+  for (const part of raw.split(/[,;|]/)) {
+    const term = part.trim().toLowerCase().replace(/\s+/g, " ");
+    if (term.length >= 2) terms.add(term);
+  }
+  return [...terms];
+}
+
+/** Listings open to the whole world pass any location filter. */
+const ANYWHERE_RE = /\bremote\b|worldwide|anywhere|global|\bintl\b/;
+
+/**
+ * A posting passes a (possibly multi-term) location filter when it is
+ * work-from-anywhere or mentions any of the requested terms — any-of, so
+ * picking several locations widens the scan instead of narrowing it.
+ */
+export function matchesLocation(
+  postLocation: string,
+  terms: string[],
+): boolean {
+  if (terms.length === 0) return true;
+  const pl = postLocation.toLowerCase();
+  if (ANYWHERE_RE.test(pl)) return true;
+  return terms.some((term) => pl.includes(term));
+}
