@@ -342,6 +342,38 @@ German filler gone ✓, relevance ordering preserved).
 Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
 **61/61 tests** (7 new — `locationTerms`/`matchesLocation` coverage).
 
+## Resolved in the thirteenth pass (2026-10-06) — B6 true PDF export
+
+- **One-click PDF download** (roadmap **B6**): new `src/lib/resumePdf.ts`
+  builds a real, text-selectable, ATS-friendly A4 PDF client-side with jsPDF
+  (`jspdf@4.2.1` added), from the same structured data `ResumeDocument`
+  renders — rose-accent section headings, contact rule, wrapped summary and
+  skills, hanging-indent bullets with drawn bullet dots, right-aligned date
+  ranges, education lines, and page-number footers only when the resume
+  spills past one page. Every write passes through `ensure()`, so page breaks
+  are computed per line — bullet-level pagination, no CSS print hacks (this
+  also covers **A6**'s unverified multi-page print).
+- **Byte-safe text + filename**: `toPdfText` folds typographic punctuation
+  (curly quotes, dashes, ellipsis, bullet → Latin-1 middle dot), keeps
+  WinAnsi-safe Latin-1, and drops anything outside it so the core fonts can't
+  corrupt the stream (live byte-verified: `é` emitted as a single WinAnsi
+  byte, no UTF-8 leakage). `pdfFilename` yields filesystem-safe
+  `Resume_<Company>.pdf` (NFKD-folded ASCII, collapsed separators, ≤60-char
+  base, `Resume.pdf` fallback).
+- **UI**: ResumeResult — both fresh results and saved views — gained a
+  **Download PDF** button beside Print / PDF; the filename comes from the
+  job's company (falling back to the role), with a success toast and a
+  friendly error fallback pointing at Print / PDF.
+
+Verified: `tsc -b --noEmit` 0, lint 0 (0/0), **70/70 tests** (9 new —
+sanitizer, filenames, valid-PDF + multi-page pagination + empty resume),
+live probes: a 12-job resume paginates to 3 pages with correct bytes, and
+the browser ESM build (`jspdf.es.min.js`, the entry Vite bundles) constructs
+and emits a valid PDF.
+
+Still open: **D5** (production build — platform rule; jsPDF now lands in the
+client graph, so it's flagged for the eventual one-time build).
+
 
 ---
 

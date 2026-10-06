@@ -2,6 +2,7 @@ import type { ApplicationKit, TailorResult } from "@/convex/ai";
 import {
   Check,
   Copy,
+  Download,
   FileText,
   Loader2,
   Printer,
@@ -10,6 +11,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { downloadResumePdf } from "@/lib/resumePdf";
 import type { ResumeProfileData } from "@/types/resume";
 import { BeforeAfterDiff } from "./BeforeAfterDiff";
 import { ClayButton } from "./ClayButton";
@@ -98,6 +101,17 @@ export function ResumeResult({
 
   const handlePrint = () => window.print();
 
+  /** B6 — one-click, text-selectable A4 PDF saved as Resume_<Company>.pdf. */
+  const handleDownloadPdf = () => {
+    try {
+      const filename = downloadResumePdf(resume, companyName || jobTitle);
+      toast.success(`${filename} downloaded — print-ready and ATS-friendly.`);
+    } catch (error) {
+      console.error("PDF export failed", error);
+      toast.error("Couldn't build the PDF — try Print / PDF instead.");
+    }
+  };
+
   const handleCopyKit = async () => {
     if (!kit) return;
     const parts = [
@@ -136,6 +150,9 @@ export function ResumeResult({
             </ClayButton>
             <ClayButton onClick={handlePrint} variant="soft">
               <Printer /> Print / PDF
+            </ClayButton>
+            <ClayButton onClick={handleDownloadPdf} variant="soft">
+              <Download /> Download PDF
             </ClayButton>
             <ClayButton onClick={onSave} disabled={isSaving}>
               {isSaving ? <RefreshCcw className="animate-spin" /> : <Save />}
