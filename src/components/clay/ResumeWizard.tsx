@@ -50,6 +50,15 @@ export interface WizardOutput {
 interface ResumeWizardProps {
   /** Previously saved master profile used to prefill step 1. */
   initialProfile: ResumeProfileData | null;
+  /** E12 — an explicit profile to update (skips the newest-profile upsert). */
+  targetProfileId?: Id<"resumeProfiles"> | null;
+  /** E12 — the target profile's label, shown in the wizard header. */
+  targetProfileName?: string | null;
+  /** E12 — start blank and mint a fresh named profile on generate. */
+  createMode?: boolean;
+  /** E12 — controls the optional profile-name field (create mode). */
+  profileNameDraft?: string;
+  onProfileNameDraftChange?: (value: string) => void;
   onGenerated: (output: WizardOutput) => void;
 }
 
@@ -142,7 +151,15 @@ function draftJobDefaults(draft: WizardDraft | null): JobFormValues {
   return { ...base, ...(draft.job as Partial<JobFormValues>) };
 }
 
-export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps) {
+export function ResumeWizard({
+  initialProfile,
+  targetProfileId = null,
+  targetProfileName = null,
+  createMode = false,
+  profileNameDraft,
+  onProfileNameDraftChange,
+  onGenerated,
+}: ResumeWizardProps) {
   // Draft read once on mount via lazy state init (render-safe, unlike a ref).
   const [restoredDraft] = useState<WizardDraft | null>(() => readDraft());
 
@@ -154,7 +171,11 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
   const [skillDraft, setSkillDraft] = useState("");
   const [urlDraft, setUrlDraft] = useState("");
   const [isImporting, setIsImporting] = useState(false);
+  // E12 — "update existing" vs "create a new profile". In target mode the
+  // header names the profile being edited; create mode starts blank.
+  const targetsProfile = targetProfileId !== null && !createMode;
   const saveProfile = useMutation(api.resumes.saveProfile);
+  const createProfile = useMutation(api.resumes.createProfile);
   const tailorResume = useAction(api.ai.tailorResume);
   const extractJobPosting = useAction(api.ai.extractJobPosting);
   const parseResumeText = useAction(api.ai.parseResumeText);
@@ -380,7 +401,11 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
         education: values.education,
       };
 
-      const profileId = await saveProfile({ profile });
+      const profileId = targetsProfile
+        ? await saveProfile({ profile, profileId: targetProfileId })
+        : createMode
+          ? await createProfile({ profile, name: profileNameDraft })
+          : await saveProfile({ profile });
 
       const result = await tailorResume({
         profileJson: JSON.stringify(profile),
@@ -428,6 +453,21 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
 
   return (
     <ClayCard className="p-0">
+      {/* E12 — which profile this wizard writes to, when explicit. */}
+      {targetsProfile && targetProfileName && (
+        <div className="border-b border-border/60 px-5 pt-4 sm:px-6">
+          <span
+            className="clay-chip inline-flex max-w-full items-center gap-1.5 px-3 py-1.5 text-xs font-bold"
+            title="Tailoring updates this profile"
+          >
+            <UserRound className="size-3.5 shrink-0" />
+            <span className="truncate">{targetProfileName}</span>
+            <span className="font-normal text-muted-foreground">
+              · edits update this profile
+            </span>
+          </span>
+        </div>
+      )}
       {/* Stepper */}
       <div className="flex items-center gap-2 border-b border-border/60 p-5 sm:gap-3 sm:p-6">
         {STEPS.map((s, i) => {
@@ -529,6 +569,17 @@ export function ResumeWizard({ initialProfile, onGenerated }: ResumeWizardProps)
                       <Loader2 className="size-4 animate-spin text-primary" />
                     )}
                   </div>
+                  {/* E12 — name a brand-new profile at creation time. */}
+                  {createMode && (
+                    <input
+                      className={FIELD_INPUT}
+                      value={profileNameDraft ?? ""}
+                      onChange={(e) => onProfileNameDraftChange?.(e.target.value)}
+                      placeholder="Name this profile (e.g. Engineering) — optional"
+                      aria-label="New profile name"
+                      maxLength={80}
+                    />
+                  )}
                   <textarea
                     className={FIELD_TEXTAREA}
                     value={resumeDraft}

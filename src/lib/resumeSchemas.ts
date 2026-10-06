@@ -46,6 +46,27 @@ export const jobSchema = z.object({
 export type ProfileFormValues = z.infer<typeof profileSchema>;
 export type JobFormValues = z.infer<typeof jobSchema>;
 
+/** --- E12: named resume profiles --- */
+
+/** Hard cap for a profile's display name; keeps cards/chips one line. */
+export const MAX_PROFILE_NAME_CHARS = 60;
+
+/**
+ * Normalize a user-typed profile name: trim, collapse whitespace, cap
+ * length. Returns null for empty input (the caller treats it as "no name").
+ */
+export function normalizeProfileName(raw: string): string | null {
+  const cleaned = raw.replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+  return cleaned.slice(0, MAX_PROFILE_NAME_CHARS);
+}
+
+/** Display label for a profile: its name, or the friendly default. */
+export function profileLabel(name: string | null | undefined): string {
+  const cleaned = name?.replace(/\s+/g, " ").trim();
+  return cleaned ? cleaned : "Default profile";
+}
+
 /** --- B5: normalize an AI-parsed resume into the wizard's form shape --- */
 
 const str = (value: unknown, max: number): string =>

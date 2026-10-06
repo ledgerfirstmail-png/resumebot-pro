@@ -547,6 +547,45 @@ education).
 Still open: **D5** (production build — platform rule); share-link UI happy
 path awaits a saved resume.
 
+## Resolved in the eighteenth pass (2026-10-06) — E12 multi-profile support
+
+- **Named resume profiles**: an account can keep several master profiles
+  (e.g. "Engineering" and "Management") and tailor each against different
+  jobs — roadmap **E12**.
+  - **Schema**: `resumeProfiles.name` (optional string).
+  - **Backend (`resumes.ts`)**: `saveProfile` gained an owner-checked
+    `profileId` arg (targets that profile explicitly; absent = legacy
+    newest-profile upsert, so nothing changed for existing users),
+    `createProfile` (never upserts — mints a fresh profile), `listProfiles`
+    (owner's profiles, creation order for stable switcher labels), and
+    `deleteProfile` (owner-checked; **refuses while any tailored resume still
+    points at the profile** — they'd lose their contact block, application
+    context, and share links). Profile names are trimmed/collapsed/capped
+    (60 chars, `normalizeProfileName`) at both ends.
+  - **Wizard**: explicit target mode (header chip "<Profile> · edits update
+    this profile"), blank-start **create mode** with an optional name field
+    on step 1, and the right mutation per mode (`saveProfile` with
+    `profileId` / `createProfile`).
+  - **Dashboard**: a **profile chip switcher** under the workspace tabs
+    (active chip highlighted, per-chip × delete with a confirming modal, and
+    a **New profile** action that opens the wizard in create mode).
+    Switching profiles clears any fresh result (so nothing is ever saved
+    into the wrong profile), keeps the saved-resume collection visible, and
+    the wizard remounts per target so its draft state never leaks between
+    profiles. Boost/kit/saves/`viewingSavedId` all key off the generating
+    profile (`resultProfile`), not "newest".
+- **Pure helpers + tests**: `normalizeProfileName`/`profileLabel` ("Default
+  profile" fallback) in `src/lib/resumeSchemas.ts`.
+
+Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
+**130/130 tests** (6 new — name normalization, capping, unicode, default
+label fallback). Live: `listProfiles` returns `[]` signed-out, `saveProfile`
+still enforces auth (`"signed out"`), existing profile rows are untouched
+(legacy users keep working exactly as before).
+
+Still open: **D5** (production build — platform rule); share-link UI happy
+path awaits a saved resume.
+
 
 ---
 

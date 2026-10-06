@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { mutation, internalMutation, query, type MutationCtx } from "./_generated/server";
 import { scoreLabelValidator, type ScoreLabel } from "./schema";
 import { isValidShareSlug, makeShareSlug } from "@/lib/shareLink";
+import { normalizeProfileName } from "@/lib/resumeSchemas";
 
 /** Every resume feature requires a signed-in account. */
 async function requireUserId(ctx: MutationCtx): Promise<Id<"users">> {
@@ -41,31 +42,83 @@ const profileValidator = v.object({
   education: v.array(educationValidator),
 });
 
+/** Normalized profile name arg (empty string → undefined = unnamed). */
+const profileNameArg = v.optional(
+  v.union(
+    v.string(),
+    v.null(),
+  ),
+);
+
+function cleanProfileName(name: string | null | undefined): string | undefined {
+  if (typeof name !== "string") return undefined;
+  const cleaned = normalizeProfileName(name);
+  return cleaned ?? undefined;
+}
+
 /** Upsert the caller's master resume profile. */
 export const saveProfile = mutation({
-  args: { profile: profileValidator },
-  handler: async (ctx, { profile }) => {
+  args: {
+    profile: profileValidator,
+    name: profileNameArg,
+    // E12 — target an explicit profile. When absent, upserts the newest.
+    profileId: v.optional(v.id("resumeProfiles")),
+  },
+  handler: async (ctx, { profile, name, profileId }) => {
     const userId = await requireUserId(ctx);
-    const existing = await ctx.db
-      .query("resumeProfiles")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .order("desc")
-      .first();
+    const existing =
+      profileId !== undefined
+        ? // Explicit target must belong to the caller.
+          await ctx.db.get(profileId).then((p) =>
+            p && p.userId === userId
+              ? p
+              : (() => {
+                  throw new Error("Profile not found");
+                })(),
+          )
+        : await ctx.db
+            .query("resumeProfiles")
+            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .order("desc")
+            .first();
 
     if (existing) {
-      await ctx.db.patch(existing._id, { ...profile, updatedAt: Date.now() });
+      await ctx.db.patch(existing._id, {
+        ...profile,
+        ...(name !== undefined ? { name: cleanProfileName(name) } : {}),
+        updatedAt: Date.now(),
+      });
       return existing._id;
     }
 
     return await ctx.db.insert("resumeProfiles", {
       ...profile,
       userId,
+      name: cleanProfileName(name),
       updatedAt: Date.now(),
     });
   },
 });
 
-/** The caller's master resume profile, or null if it hasn't been built yet. */
+/**
+ * E12 — create an additional named profile (never upserts). A user keeps
+ * several master profiles ("Engineering", "Management") and tailors each
+ * against different jobs. Returns the new profile id.
+ */
+export const createProfile = mutation({
+  args: { profile: profileValidator, name: profileNameArg },
+  handler: async (ctx, { profile, name }) => {
+    const userId = await requireUserId(ctx);
+    return await ctx.db.insert("resumeProfiles", {
+      ...profile,
+      userId,
+      name: cleanProfileName(name),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** The caller's master profile, or null if it hasn't been built yet. */
 export const getProfile = query({
   args: {},
   handler: async (ctx) => {
@@ -76,6 +129,50 @@ export const getProfile = query({
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .order("desc")
       .first();
+  },
+});
+
+/**
+ * E12 — every profile the caller owns, oldest first (creation order), so
+ * switchers render stable labels. The newest profile remains the dashboard
+ * fallback via getProfile.
+ */
+export const listProfiles = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    const all = await ctx.db
+      .query("resumeProfiles")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    return all.sort((a, b) => a._creationTime - b._creationTime);
+  },
+});
+
+/**
+ * E12 — delete an empty profile. Refuses when tailored resumes still point
+ * at it (they'd lose their contact block, application context, and share
+ * links); the owner deletes or re-points those first.
+ */
+export const deleteProfile = mutation({
+  args: { profileId: v.id("resumeProfiles") },
+  handler: async (ctx, { profileId }) => {
+    const userId = await requireUserId(ctx);
+    const profile = await ctx.db.get(profileId);
+    if (!profile || profile.userId !== userId) {
+      throw new Error("Profile not found");
+    }
+    const attached = await ctx.db
+      .query("tailoredResumes")
+      .withIndex("by_profile", (q) => q.eq("profileId", profileId))
+      .first();
+    if (attached) {
+      throw new Error(
+        "This profile still has tailored resumes — delete those first, or keep the profile.",
+      );
+    }
+    await ctx.db.delete(profileId);
   },
 });
 

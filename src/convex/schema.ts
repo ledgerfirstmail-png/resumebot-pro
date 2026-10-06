@@ -66,10 +66,13 @@ const schema = defineSchema(
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
     // The user's master resume profile — contact info, skills, experience, education.
-    // One per signed-in user; upserted by the wizard before tailoring.
+    // A user can keep several named profiles (e.g. "Engineering" and
+    // "Management", ROADMAP E12) and tailor each against different jobs.
     resumeProfiles: defineTable({
       // Owner (absent only on legacy pre-login docs).
       userId: v.optional(v.id("users")),
+      // Optional display name for the profile ("Default profile" when unset).
+      name: v.optional(v.string()),
       fullName: v.string(),
       title: v.string(),
       email: v.string(),

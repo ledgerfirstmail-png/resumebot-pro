@@ -15,10 +15,18 @@ import {
   SavedResumesEmptyState,
 } from "@/components/clay/SavedResumeCard";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { FilePlus2, Loader2, Wand2 } from "lucide-react";
+import {
+  FilePlus2,
+  Loader2,
+  UserRound,
+  UserRoundPlus,
+  Wand2,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { getSessionId } from "@/lib/session";
+import { profileLabel } from "@/lib/resumeSchemas";
 import type { ResumeProfileData } from "@/types/resume";
 
 type SavedResume = Doc<"tailoredResumes">;
@@ -26,6 +34,20 @@ type SavedResume = Doc<"tailoredResumes">;
 export default function Dashboard() {
   const profile = useQuery(api.resumes.getProfile);
   const resumes = useQuery(api.resumes.listResumes);
+  // E12 — every named profile the user owns.
+  const profiles = useQuery(api.resumes.listProfiles);
+  const deleteProfile = useMutation(api.resumes.deleteProfile);
+  // E12 — explicit target profile when the user picked one (undefined =
+  // legacy behavior: saveProfile upserts the newest).
+  const [activeProfileId, setActiveProfileId] = useState<
+    Id<"resumeProfiles"> | undefined
+  >(undefined);
+  const [createMode, setCreateMode] = useState(false);
+  const [profileNameDraft, setProfileNameDraft] = useState("");
+  const [toDeleteProfile, setToDeleteProfile] = useState<
+    Doc<"resumeProfiles"> | null
+  >(null);
+  const [isDeletingProfile, setIsDeletingProfile] = useState(false);
   // Stable session key for the usage chip (getSessionId is read-only).
   const [sessionKey] = useState(() => getSessionId());
   const usage = useQuery(api.aiUsage.usageSummary, { sessionId: sessionKey });
@@ -73,6 +95,10 @@ export default function Dashboard() {
     setViewingSavedId(null);
     setShowWizard(false);
     setKit(null);
+    // E12 — the profile the result belongs to drives saves, boost, and kit.
+    setActiveProfileId(output.profileId);
+    setCreateMode(false);
+    setProfileNameDraft("");
     toast.success(
       `Tailored resume ready — ${output.result.score}% match for ${output.job.companyName}!`,
     );
@@ -80,7 +106,8 @@ export default function Dashboard() {
 
   const handleSave = async () => {
     if (!result) return;
-    if (!profile) {
+    // E12 — the generating profile; falls back to the newest profile.
+    if (!resultProfile) {
       toast.error("Your profile is still loading — try again in a second.");
       return;
     }
@@ -88,7 +115,7 @@ export default function Dashboard() {
     try {
       await saveResume({
         ...(kit ? { applicationKit: kit } : {}),
-        profileId: profile._id,
+        profileId: resultProfile._id,
         companyName: result.companyName,
         jobTitle: result.jobTitle,
         jobDescription: result.jobDescription,
@@ -138,6 +165,12 @@ export default function Dashboard() {
     });
     setViewingSaved(true);
     setViewingSavedId(resume._id);
+    // E12 — the active profile follows the resume's own profile, so save /
+    // boost / kit / PDF-preview all use the right contact block even when a
+    // different profile is currently selected in the switcher.
+    setActiveProfileId(resume.profileId);
+    setCreateMode(false);
+    setProfileNameDraft("");
     setShowWizard(false);
     setKit(resume.applicationKit ?? null);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -172,7 +205,59 @@ export default function Dashboard() {
     setShowWizard(true);
     setKit(null);
     setTab("studio");
+    setCreateMode(false);
+    // E12 — leave activeProfileId alone: "New tailoring" continues in the
+    // profile the user last worked with (wizard targets it explicitly).
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  /** E12 — start a brand-new named profile from scratch. */
+  const startCreateProfile = () => {
+    setResult(null);
+    setViewingSaved(false);
+    setViewingSavedId(null);
+    setShowWizard(true);
+    setKit(null);
+    setTab("studio");
+    setCreateMode(true);
+    setProfileNameDraft("");
+    setActiveProfileId(undefined);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  /** E12 — point the workspace at a different profile. */
+  const switchProfile = (profileId: Id<"resumeProfiles"> | undefined) => {
+    setActiveProfileId(profileId);
+    setCreateMode(false);
+    setProfileNameDraft("");
+    // A fresh result belongs to the profile that generated it — clear the
+    // view so the user never saves into the wrong profile by accident.
+    if (result && !viewingSaved) {
+      setResult(null);
+      setViewingSavedId(null);
+    }
+  };
+
+  const handleDeleteProfile = async () => {
+    if (!toDeleteProfile) return;
+    setIsDeletingProfile(true);
+    try {
+      await deleteProfile({ profileId: toDeleteProfile._id });
+      toast.success(`Profile “${profileLabel(toDeleteProfile.name)}” deleted.`);
+      setToDeleteProfile(null);
+      if (activeProfileId === toDeleteProfile._id) {
+        setActiveProfileId(undefined);
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't delete that profile.",
+      );
+      setToDeleteProfile(null);
+    } finally {
+      setIsDeletingProfile(false);
+    }
   };
 
   /** The radar's tailor pass finished — show it in the studio. */
@@ -197,18 +282,26 @@ export default function Dashboard() {
     );
   }
 
-  const contact: ResumeProfileData = profile
+  // E12 — the profile driving the current view: the explicit pick, else the
+  // newest profile. Falls back to the query result while loading a pick.
+  const activeProfile =
+    (activeProfileId
+      ? (profiles ?? []).find((p) => p._id === activeProfileId)
+      : profile) ?? profile;
+  const resultProfile = activeProfile ?? profile;
+
+  const contact: ResumeProfileData = activeProfile
     ? {
-        fullName: profile.fullName,
-        title: profile.title,
-        email: profile.email,
-        phone: profile.phone,
-        location: profile.location,
-        portfolioUrl: profile.portfolioUrl,
-        summary: profile.summary,
-        skills: profile.skills,
-        experience: profile.experience,
-        education: profile.education,
+        fullName: activeProfile.fullName,
+        title: activeProfile.title,
+        email: activeProfile.email,
+        phone: activeProfile.phone,
+        location: activeProfile.location,
+        portfolioUrl: activeProfile.portfolioUrl,
+        summary: activeProfile.summary,
+        skills: activeProfile.skills,
+        experience: activeProfile.experience,
+        education: activeProfile.education,
       }
     : {
         fullName: "",
@@ -225,7 +318,7 @@ export default function Dashboard() {
 
   /** Re-tailor with the gap checklist fed back into the prompt (boost to 90). */
   const handleBoost = async () => {
-    if (!result || !profile) return;
+    if (!result || !resultProfile) return;
     if (result.result.missingKeywords.length === 0) return;
     setIsBoosting(true);
     try {
@@ -259,7 +352,7 @@ export default function Dashboard() {
 
   /** Generate the copy-ready application answers + cover letter for this job. */
   const handleGenerateKit = async () => {
-    if (!result || !profile) return;
+    if (!result || !resultProfile) return;
     setIsKitLoading(true);
     try {
       const generated = await generateKit({
@@ -389,6 +482,64 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* E12 — named profile switcher (studio tab only). */}
+          {tab === "studio" && profiles && profiles.length > 0 && (
+            <div
+              className="flex flex-wrap items-center gap-2"
+              role="group"
+              aria-label="Resume profile"
+            >
+              <span className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                <UserRound className="size-3.5" /> Profile
+              </span>
+              {profiles.map((p) => {
+                const isActive =
+                  createMode
+                    ? false
+                    : (activeProfileId ?? profile?._id) === p._id;
+                return (
+                  <div key={p._id} className="relative inline-flex">
+                    <button
+                      type="button"
+                      aria-pressed={isActive}
+                      onClick={() => switchProfile(p._id)}
+                      className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
+                        isActive
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "clay-chip text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {profileLabel(p.name)}
+                    </button>
+                    {profiles.length > 1 && (
+                      <button
+                        type="button"
+                        aria-label={`Delete profile ${profileLabel(p.name)}`}
+                        title={
+                          isActive
+                            ? "Switch away before deleting"
+                            : "Delete this profile (only if it has no saved resumes)"
+                        }
+                        onClick={() => setToDeleteProfile(p)}
+                        className="absolute -right-1.5 -top-1.5 rounded-full bg-background p-0.5 text-muted-foreground shadow-sm ring-1 ring-border/60 transition-colors hover:text-rose-600"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <ClayButton
+                variant="ghost"
+                size="sm"
+                onClick={startCreateProfile}
+                aria-pressed={createMode}
+              >
+                <UserRoundPlus /> New profile
+              </ClayButton>
+            </div>
+          )}
+
           {tab === "radar" ? (
             <SectionBoundary key="radar-section">
               <JobRadar
@@ -428,7 +579,36 @@ export default function Dashboard() {
             /* Wizard */
             <SectionBoundary key="wizard-section">
               <ResumeWizard
-                initialProfile={profile ?? null}
+                key={
+                  createMode
+                    ? "wizard-create"
+                    : (activeProfileId ?? "wizard-default")
+                }
+                initialProfile={
+                  createMode
+                    ? null
+                    : activeProfileId && activeProfile
+                      ? {
+                          fullName: activeProfile.fullName,
+                          title: activeProfile.title,
+                          email: activeProfile.email,
+                          phone: activeProfile.phone,
+                          location: activeProfile.location,
+                          portfolioUrl: activeProfile.portfolioUrl,
+                          summary: activeProfile.summary,
+                          skills: activeProfile.skills,
+                          experience: activeProfile.experience,
+                          education: activeProfile.education,
+                        }
+                      : profile
+                }
+                targetProfileId={createMode ? null : (activeProfileId ?? null)}
+                targetProfileName={
+                  createMode ? null : profileLabel(activeProfile?.name)
+                }
+                createMode={createMode}
+                profileNameDraft={profileNameDraft}
+                onProfileNameDraftChange={setProfileNameDraft}
                 onGenerated={handleGenerated}
               />
             </SectionBoundary>
@@ -541,6 +721,16 @@ export default function Dashboard() {
         onConfirm={handleDelete}
         onCancel={() => setToDelete(null)}
         busy={isDeleting}
+      />
+
+      <ConfirmationModal
+        open={toDeleteProfile !== null}
+        title={`Delete profile “${profileLabel(toDeleteProfile?.name)}”?`}
+        message="Only empty profiles can be deleted — if it still has tailored resumes, move or delete those first. The resumes' contact details come from the profile."
+        confirmLabel="Delete profile"
+        onConfirm={handleDeleteProfile}
+        onCancel={() => setToDeleteProfile(null)}
+        busy={isDeletingProfile}
       />
     </div>
   );
