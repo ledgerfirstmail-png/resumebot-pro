@@ -4,15 +4,19 @@ import {
   Copy,
   Download,
   FileText,
+  Link2,
+  Link2Off,
   Loader2,
   Printer,
   RefreshCcw,
   Save,
+  Share2,
   Sparkles,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { downloadResumePdf } from "@/lib/resumePdf";
+import { shareUrl } from "@/lib/shareLink";
 import type { ResumeProfileData } from "@/types/resume";
 import { BeforeAfterDiff } from "./BeforeAfterDiff";
 import { ClayButton } from "./ClayButton";
@@ -39,6 +43,12 @@ export interface ResumeResultProps {
   isSaving: boolean;
   /** True when showing an already-saved resume (hides the save action). */
   viewingSaved?: boolean;
+  /** Public share slug of the saved resume being viewed, when shared (E11). */
+  shareSlug?: string | null;
+  /** Mint a share slug for the viewed saved resume; returns it or null. */
+  onCreateShare?: () => Promise<string | null>;
+  /** Turn the public link off. */
+  onRevokeShare?: () => Promise<void>;
 }
 
 /** Post-generation panel: score, breakdown, and the tailored document. */
@@ -57,9 +67,15 @@ export function ResumeResult({
   isGeneratingKit = false,
   isSaving,
   viewingSaved = false,
+  shareSlug = null,
+  onCreateShare,
+  onRevokeShare,
 }: ResumeResultProps) {
   const [copied, setCopied] = useState(false);
   const [copiedKit, setCopiedKit] = useState(false);
+  const [creatingShare, setCreatingShare] = useState(false);
+  const [copiedShare, setCopiedShare] = useState(false);
+  const [revokingShare, setRevokingShare] = useState(false);
 
   const resume: ResumeProfileData = {
     ...contact,
@@ -100,6 +116,43 @@ export function ResumeResult({
   };
 
   const handlePrint = () => window.print();
+
+  /** E11 — mint a public read-only link and put it on the clipboard. */
+  const handleCreateShare = async () => {
+    if (!onCreateShare || creatingShare) return;
+    setCreatingShare(true);
+    try {
+      const slug = await onCreateShare();
+      if (!slug) return;
+      await navigator.clipboard.writeText(
+        shareUrl(window.location.origin, slug),
+      );
+      setCopiedShare(true);
+      setTimeout(() => setCopiedShare(false), 2500);
+      toast.success("Share link copied — anyone with it can read this resume.");
+    } finally {
+      setCreatingShare(false);
+    }
+  };
+
+  const handleCopyShareLink = async () => {
+    if (!shareSlug) return;
+    await navigator.clipboard.writeText(
+      shareUrl(window.location.origin, shareSlug),
+    );
+    setCopiedShare(true);
+    setTimeout(() => setCopiedShare(false), 2500);
+  };
+
+  const handleRevokeShare = async () => {
+    if (!onRevokeShare || revokingShare) return;
+    setRevokingShare(true);
+    try {
+      await onRevokeShare();
+    } finally {
+      setRevokingShare(false);
+    }
+  };
 
   /** B6 — one-click, text-selectable A4 PDF saved as Resume_<Company>.pdf. */
   const handleDownloadPdf = () => {
@@ -165,6 +218,48 @@ export function ResumeResult({
             <ClayButton onClick={onRefine} variant="ghost">
               <FileText /> New tailoring
             </ClayButton>
+            {/* E11 — public read-only share link for saved resumes */}
+            {viewingSaved && onCreateShare && (
+              shareSlug ? (
+                <>
+                  <ClayButton
+                    variant="soft"
+                    onClick={handleCopyShareLink}
+                    title={`${window.location.origin}/r/${shareSlug}`}
+                  >
+                    {copiedShare ? <Check /> : <Link2 />}
+                    {copiedShare ? "Link copied!" : "Copy share link"}
+                  </ClayButton>
+                  <ClayButton
+                    variant="ghost"
+                    onClick={handleRevokeShare}
+                    disabled={revokingShare}
+                    title="Turn off the public link — /r/… stops working"
+                  >
+                    {revokingShare ? (
+                      <RefreshCcw className="animate-spin" />
+                    ) : (
+                      <Link2Off />
+                    )}
+                    Stop sharing
+                  </ClayButton>
+                </>
+              ) : (
+                <ClayButton
+                  variant="soft"
+                  onClick={handleCreateShare}
+                  disabled={creatingShare}
+                  title="Anyone with the link can read this resume (no editing)"
+                >
+                  {creatingShare ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Share2 />
+                  )}
+                  {creatingShare ? "Creating…" : "Share link"}
+                </ClayButton>
+              )
+            )}
           </div>
         </div>
       </ClayCard>

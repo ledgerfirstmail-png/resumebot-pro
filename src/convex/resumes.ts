@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, internalMutation, query, type MutationCtx } from "./_generated/server";
 import { scoreLabelValidator, type ScoreLabel } from "./schema";
+import { isValidShareSlug, makeShareSlug } from "@/lib/shareLink";
 
 /** Every resume feature requires a signed-in account. */
 async function requireUserId(ctx: MutationCtx): Promise<Id<"users">> {
@@ -240,3 +241,84 @@ async function persistResume(
     createdAt: Date.now(),
   });
 }
+
+/**
+ * E11 — mint (or return the existing) public share slug for a saved resume.
+ * The link is read-only: there is no public mutation path, only the viewer.
+ */
+export const createShareLink = mutation({
+  args: { resumeId: v.id("tailoredResumes") },
+  handler: async (ctx, { resumeId }) => {
+    const userId = await requireUserId(ctx);
+    const resume = await ctx.db.get(resumeId);
+    if (!resume || resume.userId !== userId) throw new Error("Resume not found");
+    if (resume.shareSlug) return resume.shareSlug;
+
+    // Retry a few times in the (astronomically unlikely) collision case.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const slug = makeShareSlug();
+      const taken = await ctx.db
+        .query("tailoredResumes")
+        .withIndex("by_share_slug", (q) => q.eq("shareSlug", slug))
+        .first();
+      if (taken) continue;
+      await ctx.db.patch(resumeId, { shareSlug: slug });
+      return slug;
+    }
+    throw new Error("Couldn't create a share link — try again.");
+  },
+});
+
+/** Turn the public link off — the slug is cleared and /r/<slug> stops resolving. */
+export const revokeShareLink = mutation({
+  args: { resumeId: v.id("tailoredResumes") },
+  handler: async (ctx, { resumeId }) => {
+    const userId = await requireUserId(ctx);
+    const resume = await ctx.db.get(resumeId);
+    if (!resume || resume.userId !== userId) throw new Error("Resume not found");
+    await ctx.db.patch(resumeId, { shareSlug: undefined });
+  },
+});
+
+/**
+ * Public, read-only view of a shared resume. Deliberately sanitized: no
+ * owner id, no original job posting, no application kit, no internal gap
+ * notes — just the resume itself plus the contact block from the profile.
+ */
+export const getSharedResume = query({
+  args: { slug: v.string() },
+  handler: async (ctx, { slug }) => {
+    const normalized = slug.trim().toLowerCase();
+    if (!isValidShareSlug(normalized)) return null;
+
+    const resume = await ctx.db
+      .query("tailoredResumes")
+      .withIndex("by_share_slug", (q) => q.eq("shareSlug", normalized))
+      .unique();
+    if (!resume) return null;
+
+    const profile = await ctx.db.get(resume.profileId);
+    return {
+      jobTitle: resume.jobTitle,
+      companyName: resume.companyName,
+      score: resume.score,
+      breakdown: resume.breakdown,
+      summary: resume.summary,
+      skills: resume.skills,
+      experience: resume.experience,
+      education: resume.education,
+      keywords: resume.keywords,
+      createdAt: resume.createdAt,
+      contact: profile
+        ? {
+            fullName: profile.fullName,
+            title: profile.title,
+            email: profile.email,
+            phone: profile.phone,
+            location: profile.location,
+            portfolioUrl: profile.portfolioUrl,
+          }
+        : null,
+    };
+  },
+});

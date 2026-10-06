@@ -15,6 +15,7 @@ import "./index.css";
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Auth = lazy(() => import("./pages/Auth.tsx"));
+const SharedResume = lazy(() => import("./pages/SharedResume.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 /** Silent error boundary — if VlyToolbar crashes it renders nothing instead of
@@ -105,6 +106,10 @@ createRoot(document.getElementById("root")!).render(
                       <Dashboard />
                     </RequireAuth>
                   }
+                />
+                <Route
+                  path="/r/:slug"
+                  element={<SharedResume />}
                 />
                 <Route path="*" element={<NotFound />} />
               </Routes>

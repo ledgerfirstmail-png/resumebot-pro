@@ -452,6 +452,47 @@ list/detail (Austin, TX + 13 KB description).
 
 Still open: **D5** (production build — platform rule).
 
+## Resolved in the sixteenth pass (2026-10-06) — E11 shareable read-only resume link
+
+- **Public read-only share links**: a saved resume can now be shared at
+  `/r/<slug>` for recruiters/hiring managers to read without an account —
+  roadmap **E-list 11**.
+  - **Schema**: `tailoredResumes.shareSlug` (optional) + `by_share_slug`
+    index. Set = shared, cleared = link stops resolving.
+  - **Backend (`resumes.ts`)**: `createShareLink` (owner-checked; mints a
+    random 10-char slug with collision retry, idempotent) and
+    `revokeShareLink` (owner-checked; clears the slug) — both require a
+    signed-in owner. `getSharedResume` is the public query: it validates the
+    slug shape, resolves through the index (case-normalized), and returns a
+    **sanitized payload** — resume + score/breakdown + the profile's contact
+    block, with the original job posting, application kit, gap notes, and
+    owner id deliberately excluded (live-verified: seeded a synthetic shared
+    doc, confirmed the payload omitted two planted `SECRET …` strings, then
+    deleted the doc and the seed mutations).
+  - **Pure helpers (`src/lib/shareLink.ts`)**: `makeShareSlug` (Web Crypto,
+    no-lookalike alphabet), `isValidShareSlug` (4–32 lowercase alnum — rejects
+    traversal/injection-shaped input), `shareUrl` (origin-trimming
+    `/r/<slug>` joiner).
+  - **UI**: a **Share link** button on the saved-resume result view mints the
+    slug and copies the URL in one click (toasts + “Link copied!” state);
+    once shared it becomes **Copy share link** + **Stop sharing** (with a
+    confirming toast). Wired through `Dashboard` state (`viewingSavedId` →
+    the viewed doc's `shareSlug`).
+  - **Public page `src/pages/SharedResume.tsx`** (`/r/:slug`, lazy, outside
+    `RequireAuth`): loading spinner, friendly dead-end for unknown/revoked
+    slugs, score-gauge header with a “Shared resume · read-only” chip, the
+    resume sheet with Print + Download PDF (reuses `resumePdf`), theme
+    toggle, and CTAs into `/dashboard` (which routes signed-out visitors to
+    `/auth?returnTo=…`).
+
+Verified: `convex dev --once` 0, `tsc -b --noEmit` 0, lint 0 (0/0),
+**101/101 tests** (8 new — slug length/charset/uniqueness, validation
+rejections, URL joining), plus live probes: invalid slug → null, unknown slug
+→ null, seeded slug → sanitized payload (case-insensitive), seed cleaned up.
+
+Still open: **D5** (production build — platform rule); share-link happy path
+through the UI awaits a saved resume (the deployment has none yet).
+
 
 ---
 

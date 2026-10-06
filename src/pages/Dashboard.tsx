@@ -44,6 +44,10 @@ export default function Dashboard() {
   const [kit, setKit] = useState<ApplicationKit | null>(null);
   const [isKitLoading, setIsKitLoading] = useState(false);
   const [viewingSaved, setViewingSaved] = useState(false);
+  // Which saved doc the result view is showing (drives the share controls).
+  const [viewingSavedId, setViewingSavedId] = useState<
+    Id<"tailoredResumes"> | null
+  >(null);
   const [toDelete, setToDelete] = useState<SavedResume | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
@@ -51,6 +55,8 @@ export default function Dashboard() {
   const [tab, setTab] = useState<"studio" | "radar">("studio");
 
   const deleteResume = useMutation(api.resumes.deleteResume);
+  const createShareLink = useMutation(api.resumes.createShareLink);
+  const revokeShareLink = useMutation(api.resumes.revokeShareLink);
 
   const handleGenerated = (output: {
     result: TailorResult;
@@ -64,6 +70,7 @@ export default function Dashboard() {
       result: output.result,
     });
     setViewingSaved(false);
+    setViewingSavedId(null);
     setShowWizard(false);
     setKit(null);
     toast.success(
@@ -101,6 +108,7 @@ export default function Dashboard() {
       );
       setResult(null);
       setViewingSaved(false);
+      setViewingSavedId(null);
       setShowWizard(false);
       setKit(null);
     } catch (error) {
@@ -129,6 +137,7 @@ export default function Dashboard() {
       },
     });
     setViewingSaved(true);
+    setViewingSavedId(resume._id);
     setShowWizard(false);
     setKit(resume.applicationKit ?? null);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -142,6 +151,7 @@ export default function Dashboard() {
       if (result) {
         setResult(null);
         setViewingSaved(false);
+        setViewingSavedId(null);
       }
       setKit(null);
       toast.success("Saved resume deleted.");
@@ -158,6 +168,7 @@ export default function Dashboard() {
   const startNewTailoring = () => {
     setResult(null);
     setViewingSaved(false);
+    setViewingSavedId(null);
     setShowWizard(true);
     setKit(null);
     setTab("studio");
@@ -171,6 +182,7 @@ export default function Dashboard() {
   ) => {
     setResult({ ...job, result: tailored });
     setViewingSaved(false);
+    setViewingSavedId(null);
     setShowWizard(false);
     setKit(null);
     setTab("studio");
@@ -271,6 +283,40 @@ export default function Dashboard() {
       setIsKitLoading(false);
     }
   };
+
+  /** E11 — mint the public read-only link for the resume being viewed. */
+  const handleCreateShare = async (): Promise<string | null> => {
+    if (!viewingSavedId) return null;
+    try {
+      return await createShareLink({ resumeId: viewingSavedId });
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't create a share link — try again.",
+      );
+      return null;
+    }
+  };
+
+  /** E11 — turn the public link off (slug cleared, /r/… stops resolving). */
+  const handleRevokeShare = async () => {
+    if (!viewingSavedId) return;
+    try {
+      await revokeShareLink({ resumeId: viewingSavedId });
+      toast.success("Sharing stopped — the public link no longer works.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't stop sharing.",
+      );
+    }
+  };
+
+  // The saved doc being viewed — its shareSlug drives the share controls.
+  const savedResume =
+    viewingSavedId && resumes
+      ? (resumes.find((r) => r._id === viewingSavedId) ?? null)
+      : null;
 
   return (
     <div>
@@ -373,6 +419,9 @@ export default function Dashboard() {
                 isGeneratingKit={isKitLoading}
                 isSaving={isSaving}
                 viewingSaved={viewingSaved}
+                shareSlug={savedResume?.shareSlug ?? null}
+                onCreateShare={handleCreateShare}
+                onRevokeShare={handleRevokeShare}
               />
             </SectionBoundary>
           ) : showWizard ? (
