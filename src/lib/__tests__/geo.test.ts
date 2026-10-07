@@ -3,13 +3,18 @@ import {
   clampRadius,
   haversineMiles,
   MAX_RADIUS_MILES,
-  mentionsPlace,
+  placeFallbackAllowed,
+  passesRadiusChips,
+  RADIUS_FALLBACK_MAX_MILES,
   MIN_RADIUS_MILES,
   nominatimFirstPlace,
   normalizeGeoKey,
   parseLocationChips,
   parseRadiusLocation,
   RADIUS_RE,
+  usStateInText,
+  type GeoPlace,
+  type RadiusChip,
 } from "@/lib/geo";
 
 describe("radius token parsing", () => {
@@ -114,15 +119,129 @@ describe("nominatim parsing", () => {
   });
 });
 
+describe("state detection", () => {
+  it("reads unambiguous state spellings", () => {
+    expect(usStateInText("Columbus, OH")).toBe("oh");
+    expect(usStateInText("Portland OR 97201")).toBe("or");
+    expect(usStateInText("Austin, Texas")).toBe("tx");
+    expect(usStateInText("Remote")).toBeNull();
+  });
+
+  it("never mistakes bare words like 'in' or 'or' for states", () => {
+    expect(usStateInText("Work in Columbus")).toBeNull();
+    expect(usStateInText("Portland or Cleveland")).toBeNull();
+  });
+});
+
 describe("fallback place matching", () => {
-  it("requires every token of the place to appear", () => {
-    expect(mentionsPlace("Gahanna, OH", "Gahanna, OH")).toBe(true);
-    expect(mentionsPlace("43215", "43215")).toBe(true);
-    expect(mentionsPlace("Columbus, OH 43215", "43215")).toBe(true);
-    expect(mentionsPlace("Remote", "Gahanna, OH")).toBe(false);
-    expect(mentionsPlace("Columbus, GA", "Columbus, OH")).toBe(false);
-    expect(mentionsPlace("", "Columbus")).toBe(false);
-    expect(mentionsPlace("Columbus", "")).toBe(false);
+  it("accepts postings that name the place without conflicting states", () => {
+    expect(placeFallbackAllowed("Gahanna, OH", "Gahanna, OH")).toBe(true);
+    expect(placeFallbackAllowed("43215", "43215")).toBe(true);
+    expect(placeFallbackAllowed("Columbus, OH 43215", "43215")).toBe(true);
+    expect(placeFallbackAllowed("Columbus", "Columbus, OH")).toBe(true);
+    expect(placeFallbackAllowed("Work in Columbus", "Columbus, OH")).toBe(
+      true,
+    );
+  });
+
+  it("rejects postings that name a different place or state", () => {
+    expect(placeFallbackAllowed("Remote", "Gahanna, OH")).toBe(false);
+    expect(placeFallbackAllowed("Columbus, GA", "Columbus, OH")).toBe(false);
+    expect(placeFallbackAllowed("Columbus, IN", "Columbus")).toBe(false);
+    expect(placeFallbackAllowed("Columbus, OH", "Columbus")).toBe(false);
+    expect(placeFallbackAllowed("Romeoville", "Rome, GA")).toBe(false);
+  });
+
+  it("rejects empty inputs", () => {
+    expect(placeFallbackAllowed("", "Columbus")).toBe(false);
+    expect(placeFallbackAllowed("Columbus", "")).toBe(false);
+    expect(placeFallbackAllowed("NY", "New York, NY")).toBe(false); // token <3 chars
+  });
+});
+
+describe("radius decision", () => {
+  const origin: GeoPlace = {
+    displayName: "Columbus, Franklin County, Ohio, United States",
+    lat: 39.96118,
+    lon: -82.99879,
+  };
+  const gahanna: GeoPlace = {
+    displayName: "Gahanna, Franklin County, Ohio, United States",
+    lat: 39.9985,
+    lon: -82.8687,
+  };
+  const cleveland: GeoPlace = {
+    displayName: "Cleveland, Cuyahoga County, Ohio, United States",
+    lat: 41.4995,
+    lon: -81.6954,
+  };
+  const columbusGa: GeoPlace = {
+    displayName: "Columbus, Muscogee County, Georgia, United States",
+    lat: 32.4609,
+    lon: -84.9877,
+  };
+  const chip35: RadiusChip = { location: "Columbus, OH", radiusMiles: 35 };
+
+  const decide = (
+    postLocation: string,
+    places: Record<string, GeoPlace | null>,
+    chips: RadiusChip[] = [chip35],
+    origins: Record<string, GeoPlace | null> = { "Columbus, OH": origin },
+  ) =>
+    passesRadiusChips({
+      postLocation,
+      chips,
+      origins: new Map(Object.entries(origins)),
+      places: new Map(
+        Object.entries(places).map(([k, v]) => [normalizeGeoKey(k), v]),
+      ),
+    });
+
+  it("keeps postings measuring inside the radius", () => {
+    expect(decide("Gahanna, OH", { "Gahanna, OH": gahanna })).toBe(true);
+    // ZIP-only locations match through their city part too.
+    expect(decide("Gahanna, OH 43230", { Gahanna: gahanna })).toBe(true);
+    expect(
+      decide("Gahanna, OH 43230", { "Gahanna, OH 43230": gahanna }),
+    ).toBe(true);
+  });
+
+  it("drops postings measuring outside the radius even when named", () => {
+    expect(decide("Cleveland, OH", { "Cleveland, OH": cleveland })).toBe(
+      false,
+    );
+    expect(
+      decide("Cleveland, OH", { "Cleveland, OH": cleveland }, [
+        { location: "Columbus, OH", radiusMiles: MAX_RADIUS_MILES },
+      ]),
+    ).toBe(false);
+  });
+
+  it("trusts the name only for unmeasured postings at commute radii", () => {
+    expect(decide("Columbus, OH 43215", {})).toBe(true);
+    expect(
+      decide("Columbus, OH 43215", {}, [
+        { location: "Columbus, OH", radiusMiles: RADIUS_FALLBACK_MAX_MILES + 15 },
+      ]),
+    ).toBe(false);
+  });
+
+  it("lets real measurements override the name fallback", () => {
+    expect(decide("Columbus, GA", { "Columbus, GA": columbusGa })).toBe(
+      false,
+    );
+  });
+
+  it("never auto-passes remote postings in a strict scan", () => {
+    expect(decide("Remote", {})).toBe(false);
+    expect(decide("Remote (US only)", {})).toBe(false);
+  });
+
+  it("degrades to name matching when the geocoder failed", () => {
+    const down = { "Columbus, OH": null };
+    expect(decide("Columbus, OH", {}, [chip35], down)).toBe(true);
+    expect(decide("Remote", {}, [chip35], down)).toBe(false);
+    expect(decide("Cleveland, OH", {}, [chip35], down)).toBe(false);
   });
 });
 

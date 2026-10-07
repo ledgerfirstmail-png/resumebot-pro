@@ -127,11 +127,17 @@ The radar scans 13 key-free boards. Location handling:
 - Radius chips ("Columbus, OH within 35mi") add a **distance filter**:
   the server geocodes the place once (Nominatim via the `geoCache` table,
   7-day TTL, shared across users), then keeps postings whose location
-  measures inside the radius (haversine). Postings that merely *name* the
-  place still pass commute-sized radii (≤35 mi); wider radii require cached
-  coordinates. If the geocoder is unreachable the scan degrades to plain
-  location matching — it never fails. Radius chips ride along in saved
-  watches, so the hourly sweep sweeps the same 35-mile circle.
+  measures inside the radius (haversine). Posting locations that missed the
+  cache are geocoded too — bounded to ~12 new lookups per scan, only for
+  postings the filter would otherwise drop, and persisted so every later
+  scan/sweep measures for free. Unmeasured postings that *name* the place
+  still pass commute-sized radii (≤35 mi) — state-aware, so "Columbus, GA"
+  never matches a "Columbus, OH" chip; wider radii require real
+  coordinates. Remote/anywhere postings no longer auto-pass a radius chip
+  (add a plain Remote chip to include them). If the geocoder is unreachable
+  the scan degrades to name matching — it never fails. Radius chips ride
+  along in saved watches, so the hourly sweep sweeps the same 35-mile
+  circle.
 
 # Frontend Conventions
 

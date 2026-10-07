@@ -655,11 +655,22 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
     (`convex/geo.ts`, internal lookup/save, 7-day TTL) backed by
     **OpenStreetMap Nominatim** — live-probed first: ZIPs (`postalcode`),
     "City, ST", and small towns all resolve (Open-Meteo mishandles ZIPs, so
-    it was rejected). Postings then pass when their location string is
-    cached and haversine-measures inside the radius, or — commute-sized
-    radii (≤35 mi) only — when they name the chip's place but were never
-    geocoded (`mentionsPlace` fallback). Remote/anywhere postings always
-    pass; plain chips still apply any-of.
+    it was rejected). Postings then pass when their location measures inside
+    the radius, or — commute-sized radii (≤35 mi) only — when they name the
+    chip's place with a consistent US state (`placeFallbackAllowed` in
+    `lib/geo.ts`). Remote/anywhere postings pass only via an explicit
+    Remote chip; plain chips still apply any-of.
+  - **Accuracy pass (2026-10-07)**: the first cut only distance-checked
+    *cached* posting locations — which nothing primed — so scans skewed to
+    name matches and remote floods. Now posting locations that missed the
+    cache are geocoded on demand (bounded to ~12 Nominatim lookups per
+    scan, spent only on postings the filter would drop, persisted in
+    `geoCache` so later scans/sweeps measure for free), the pure decision
+    moved to `lib/geo.passesRadiusChips` (measured distance wins over the
+    name; unmeasured names pass ≤35 mi with state agreement; geocoder down
+    degrades to name matching), and remote/anywhere postings stopped
+    auto-passing radius chips. UI adds a hint that a Remote chip opts back
+    into work-from-anywhere listings.
   - **Graceful degradation**: geocoder down or a >35 mi chip without cached
     coordinates falls back to the ordinary location matcher — a scan never
     fails because of Nominatim (its 1 req/s policy is respected by the

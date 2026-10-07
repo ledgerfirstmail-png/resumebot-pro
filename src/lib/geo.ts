@@ -7,6 +7,8 @@
  * network access — the server side (Nominatim + cache) lives in jobSearch.ts.
  */
 
+import { US_STATES } from "./matchScore";
+
 /** Minimum radius the scan accepts — a tighter "within" is noise. */
 export const MIN_RADIUS_MILES = 5;
 /** Maximum radius offered — beyond a commute, a state chip is the better filter. */
@@ -126,16 +128,124 @@ function parseCoord(value: unknown): number | undefined {
 }
 
 /**
- * Fallback check when a posting's location can't be geocoded: keep it only
- * when it names the scanned place (its main token — the city or ZIP — or
- * every token at once), so we never claim a match we can't place on a map.
+ * Radius up to which the name-match fallback may pass postings that couldn't
+ * be measured — 35 miles around a named town covers its metro; wider radii
+ * need real coordinates instead of a name check.
  */
-export function mentionsPlace(postLocation: string, placeQuery: string): boolean {
-  const pl = postLocation.toLowerCase().trim();
+export const RADIUS_FALLBACK_MAX_MILES = 35;
+
+const STATE_ABBRS = [...new Set(Object.values(US_STATES))].join("|");
+/** State abbreviations only count next to a comma or a ZIP ("in"/"or" are words). */
+const ABBR_AFTER_COMMA_RE = new RegExp(`[,;|]\\s*(${STATE_ABBRS})\\b`, "i");
+const ABBR_BEFORE_ZIP_RE = new RegExp(`\\b(${STATE_ABBRS})\\s+\\d{5}\\b`, "i");
+
+/**
+ * The US state a location string names ("oh"), or null. Full state names
+ * match anywhere; two-letter abbreviations only count in unambiguous spots
+ * (", OH", "OH 43215") so "Work in Columbus" never reads as Indiana.
+ */
+export function usStateInText(text: string): string | null {
+  const pl = text.toLowerCase().replace(/\s+/g, " ").trim();
+  for (const [name, abbr] of Object.entries(US_STATES)) {
+    if (pl.includes(name)) return abbr;
+  }
+  return (
+    ABBR_AFTER_COMMA_RE.exec(pl)?.[1] ?? ABBR_BEFORE_ZIP_RE.exec(pl)?.[1] ?? null
+  );
+}
+
+/**
+ * Fallback trust when a posting's location can't be measured: it names the
+ * scanned place (word-boundary city/ZIP token) and — when both strings name
+ * US states — the states agree, so "Columbus, GA" never matches a
+ * "Columbus, OH" chip even though both spell Columbus.
+ */
+export function placeFallbackAllowed(
+  postLocation: string,
+  placeQuery: string,
+): boolean {
+  const pl = postLocation.toLowerCase().replace(/\s+/g, " ").trim();
   const tokens = placeQuery
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 2);
+    .filter((t) => t.length >= 3);
   if (!pl || tokens.length === 0) return false;
-  return tokens.every((t) => pl.includes(t));
+  // The longest token (city or ZIP) carries the identity; short tokens like
+  // "oh" would false-match inside unrelated words.
+  const place = tokens.reduce((a, b) => (b.length > a.length ? b : a));
+  if (!new RegExp(`\\b${place}\\b`).test(pl)) return false;
+  const postState = usStateInText(pl);
+  if (!postState) return true; // posting names no state — nothing to conflict
+  const chipState = usStateInText(placeQuery);
+  if (!chipState) {
+    // A stateless chip is only trustworthy when it's a ZIP (unambiguous);
+    // a bare city name ("Columbus") can't confirm which state it meant.
+    return /^\d{5}(-\d{4})?$/.test(placeQuery.trim());
+  }
+  return postState === chipState;
+}
+
+/** Inputs for one posting's radius decision (all resolved up-front). */
+export interface RadiusDecisionInput {
+  postLocation: string;
+  /** Radius chips only — plain chips are handled by the caller (any-of). */
+  chips: RadiusChip[];
+  /** Chip place → resolved origin (null when the geocoder failed for it). */
+  origins: Map<string, GeoPlace | null>;
+  /** Normalized posting-location key → cached place (null when unmeasured). */
+  places: Map<string, GeoPlace | null>;
+}
+
+/**
+ * Decide whether one posting passes the radius chips — the accuracy core of
+ * the local scan, pure so tests cover every branch:
+ *   • measured: a candidate location resolves to cached coordinates inside
+ *     the radius → pass; outside → fail (the map wins over the name).
+ *   • unmeasured: posting never got coordinates and the radius is
+ *     commute-sized (≤35mi) → trust the name via placeFallbackAllowed.
+ *   • anywhere/remote postings have no auto-pass — a local scan keeps them
+ *     only when they name the scanned place; add a Remote chip for those.
+ *   • degraded (no chip origin resolved — geocoder down): fall back to name
+ *     matching so the scan still returns results instead of nothing.
+ */
+export function passesRadiusChips(input: RadiusDecisionInput): boolean {
+  const loc = input.postLocation;
+  if (input.chips.length === 0) return false;
+  const anyOrigin = input.chips.some(
+    (c) => (input.origins.get(c.location) ?? null) !== null,
+  );
+  if (!anyOrigin) {
+    // Geocoder down — degrade to name matching so the scan stays usable.
+    return input.chips.some((c) => placeFallbackAllowed(loc, c.location));
+  }
+  const trimmed = loc.trim();
+  const firstPart = trimmed.split(",")[0].trim();
+  const candidates = [
+    ...new Set([trimmed, firstPart].filter((s) => s.length >= 2)),
+  ];
+  for (const chip of input.chips) {
+    const origin = input.origins.get(chip.location) ?? null;
+    if (!origin) continue; // this chip couldn't be geocoded — no distance check
+    const radius = chip.radiusMiles ?? 0;
+    let measured = false;
+    for (const candidate of candidates) {
+      const place = input.places.get(normalizeGeoKey(candidate));
+      if (!place) continue;
+      measured = true;
+      if (
+        haversineMiles(origin.lat, origin.lon, place.lat, place.lon) <=
+        radius
+      ) {
+        return true;
+      }
+    }
+    if (
+      !measured &&
+      radius <= RADIUS_FALLBACK_MAX_MILES &&
+      placeFallbackAllowed(loc, chip.location)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

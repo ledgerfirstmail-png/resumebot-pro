@@ -24,11 +24,10 @@ import {
   type MatchProfile,
 } from "../lib/matchScore";
 import {
-  haversineMiles,
-  mentionsPlace,
   nominatimFirstPlace,
   normalizeGeoKey,
   parseLocationChips,
+  passesRadiusChips,
   type GeoPlace,
   type RadiusChip,
 } from "../lib/geo";
@@ -504,11 +503,12 @@ async function resolvePlace(
 }
 
 /**
- * Radius up to which the name-match fallback may pass postings that couldn't
- * be geocoded — 35 miles around a named town covers its metro; wider radii
- * need real coordinates instead of a name check.
+ * New Nominatim lookups a single scan may spend on posting locations — the
+ * cache-first read is unlimited, but the network budget keeps worst-case
+ * latency bounded and respects Nominatim's ~1 req/s policy. Coordinates are
+ * persisted, so repeat scans and watch sweeps pay nothing for known strings.
  */
-const RADIUS_FALLBACK_MAX_MILES = 35;
+const RADIUS_GEOCODE_BUDGET = 12;
 
 /** Cache-only coordinate read for an exact posting-location string. */
 async function cachedPlaceFor(
@@ -529,11 +529,14 @@ async function cachedPlaceFor(
 /**
  * Filter postings to the requested radius chips (the 35-mile local scan).
  * Each chip's origin ("Columbus, OH within 35mi") is resolved once via the
- * geocode cache + Nominatim. A posting passes a chip when its location
- * string is cached and measures inside the radius, or — when its string was
- * never geocoded and the radius is commute-sized (≤35mi) — when it names the
- * chip's place. Postings open to the whole world always pass; plain chips
- * in the same search still apply any-of ("…within 35mi" + "Remote").
+ * geocode cache + Nominatim. Postings pass when they measure inside the
+ * radius, or — when their location has no coordinates and the radius is
+ * commute-sized (≤35mi) — when they name the chip's place with a consistent
+ * state. Remote/anywhere postings no longer auto-pass: a local scan keeps
+ * them only when they name the place; add a Remote chip to include them.
+ * Posting locations that missed the cache are geocoded (bounded budget,
+ * persisted) — but only for postings the scan would otherwise lose, so the
+ * budget goes to recall, not to results it already keeps.
  */
 async function filterByRadius(
   ctx: ActionCtx,
@@ -558,9 +561,19 @@ async function filterByRadius(
   for (const chip of radiusChips) {
     origins.set(chip.location, await resolvePlace(ctx, chip.location));
   }
+  const canMeasure = [...origins.values()].some((o) => o !== null);
 
-  // Pre-read the geocode cache for every distinct posting-location string
-  // (full string + its city part) so the filter below stays synchronous.
+  const passes = (p: RawPosting, places: Map<string, GeoPlace | null>) =>
+    passesRadiusChips({
+      postLocation: p.location,
+      chips: radiusChips,
+      origins,
+      places,
+    }) ||
+    (plainTerms.length > 0 && matchesLocation(p.location, plainTerms));
+
+  // Pass 1: cache-only coordinates for every distinct posting-location
+  // string (full string + its city part) — the first decision is free.
   const exactKeys = new Set<string>();
   for (const p of postings) {
     const trimmed = p.location.trim();
@@ -569,53 +582,37 @@ async function filterByRadius(
     if (firstPart.length >= 2) exactKeys.add(firstPart);
   }
   const cache = new Map<string, GeoPlace | null>();
+  const missing = new Set<string>();
   for (const key of exactKeys) {
-    cache.set(key, await cachedPlaceFor(ctx, key));
+    const cached = await cachedPlaceFor(ctx, key);
+    cache.set(normalizeGeoKey(key), cached);
+    if (!cached) missing.add(normalizeGeoKey(key));
+  }
+  let kept = postings.filter((p) => passes(p, cache));
+
+  // Pass 2: postings the scan would drop get their locations geocoded
+  // (bounded budget, results persisted) and the decision re-runs — turning
+  // name-based guesses into real distance measurements.
+  if (canMeasure) {
+    let budget = RADIUS_GEOCODE_BUDGET;
+    for (const p of postings) {
+      if (budget <= 0) break;
+      if (passes(p, cache)) continue; // budget is for losses, not keeps
+      for (const candidate of [p.location.trim(), p.location.split(",")[0].trim()]) {
+        const key = candidate.trim();
+        const norm = normalizeGeoKey(key);
+        if (key.length < 3 || isAnywhere(key) || !missing.has(norm)) continue;
+        missing.delete(norm);
+        const place = await resolvePlace(ctx, key);
+        cache.set(norm, place);
+        budget -= 1;
+        if (budget <= 0) break;
+      }
+    }
+    kept = postings.filter((p) => passes(p, cache));
   }
 
-  const filtered = postings.filter((p) => {
-    if (isAnywhere(p.location)) return true;
-    const trimmed = p.location.trim();
-    const firstPart = trimmed.split(",")[0].trim();
-    const candidates = [
-      ...new Set([trimmed, firstPart].filter((s) => s.length >= 2)),
-    ];
-    for (const chip of radiusChips) {
-      const origin = origins.get(chip.location);
-      if (!origin) continue; // geocoder failed for this chip — no distance checks
-      const radius = chip.radiusMiles ?? 0;
-      let radiusPass = false;
-      let sawCached = false;
-      for (const candidate of candidates) {
-        const place = cache.get(normalizeGeoKey(candidate));
-        if (!place) continue;
-        sawCached = true;
-        if (
-          haversineMiles(origin.lat, origin.lon, place.lat, place.lon) <=
-          radius
-        ) {
-          radiusPass = true;
-          break;
-        }
-      }
-      if (
-        !radiusPass &&
-        !sawCached &&
-        radius <= RADIUS_FALLBACK_MAX_MILES &&
-        mentionsPlace(p.location, chip.location)
-      ) {
-        // Names the place but was never geocoded — commute-sized radii trust
-        // the name; wider radii need real coordinates.
-        radiusPass = true;
-      }
-      if (radiusPass) return true;
-    }
-    // Plain chips in the same search still apply any-of.
-    return plainTerms.length > 0
-      ? matchesLocation(p.location, plainTerms)
-      : false;
-  });
-  return { postings: filtered, origins };
+  return { postings: kept, origins };
 }
 
 /** Fetch every board independently — one outage must not kill the search. */
@@ -690,9 +687,10 @@ async function gatherPostings(
     postings = postings.filter((p) => matchesLocation(p.location, locTerms));
   }
 
-  // 35-mile radius scan: geocode each radius chip's origin once (cached),
-  // then keep postings measuring inside the radius — or naming the place
-  // for commute-sized chips. Plain chips still apply any-of inside.
+  // Radius scan: resolve each radius chip's origin (cached), keep postings
+  // measuring inside the radius — geocoding unknown posting locations within
+  // a bounded budget — or naming the place for commute-sized chips. Remote
+  // postings pass only via an explicit Remote chip or a named local place.
   if (chips.some((c) => c.radiusMiles !== undefined)) {
     const radiusOut = await filterByRadius(ctx, postings, chips);
     return { postings: radiusOut.postings, errors };

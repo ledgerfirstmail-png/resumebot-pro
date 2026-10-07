@@ -725,6 +725,14 @@ export function JobRadar({
             )}
           </div>
 
+          {radiusChips.length > 0 &&
+            !locations.some((l) => l.toLowerCase().includes("remote")) && (
+              <p className="text-xs text-muted-foreground">
+                Local scan keeps jobs inside the radius — add a Remote chip to
+                include work-from-anywhere roles.
+              </p>
+            )}
+
           {/* Local employers (retail & food) quick-picks */}
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
