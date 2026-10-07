@@ -6,6 +6,7 @@ import {
   ArrowRight,
   BadgeCheck,
   Bell,
+  Briefcase,
   Gauge,
   MousePointerClick,
   Printer,
@@ -90,6 +91,13 @@ const FEATURES = [
     text: "text-sky-800",
     title: "Auto-apply, then watch",
     body: "Auto-apply to shortlisted hits with a fresh tailored resume each — and let saved watches email you, or ping Telegram, when new matches land.",
+  },
+  {
+    icon: Briefcase,
+    color: "bg-clay-blush",
+    text: "text-rose-700",
+    title: "Track every application",
+    body: "A pipeline view from applied to interview to offer — see where each posting stands, with the dates and scores behind it.",
   },
 ];
 
@@ -316,8 +324,9 @@ export default function Landing() {
               </h2>
               <p className="max-w-md text-sm leading-6 text-muted-foreground">
                 Build your profile once — then let the job radar bring hiring
-                employers to you, tailor every application, and watch the score
-                climb past what businesses are looking for.
+                employers to you, tailor every application, track it from
+                applied to interview, and watch the score climb past what
+                businesses are looking for.
               </p>
               <ClayButton size="lg" onClick={handleGetStarted}>
                 Get started free <ArrowRight />

@@ -6,6 +6,7 @@ import { ClayCard } from "@/components/clay/ClayCard";
 import { useAction, useMutation, useQuery } from "convex/react";
 import {
   Bell,
+  Briefcase,
   Check,
   ExternalLink,
   Loader2,
@@ -21,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, Fragment, useMemo, useRef, useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import { parseRadiusLocation } from "@/lib/geo";
 import { getSessionId } from "@/lib/session";
@@ -865,6 +867,14 @@ export function JobRadar({
                 {visible.length} of {matches.length} saved ·{" "}
                 {groupByLocation ? "grouped by city/state" : "sorted by match"}
               </span>
+              <Link
+                to="/tracker"
+                className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-card px-2.5 py-1 text-xs font-bold text-muted-foreground ring-1 ring-border/60 transition-colors hover:text-foreground"
+                title="Follow your applications from applied to interview"
+              >
+                <Briefcase className="size-3" />
+                Tracker
+              </Link>
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">

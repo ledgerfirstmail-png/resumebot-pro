@@ -621,6 +621,22 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twenty-third pass (2026-10-07) — tracker discovery & landing refresh
+
+- **Radar → tracker cross-link**: the results toolbar gained a Tracker
+  link (react-router `Link`, Briefcase icon) so a scan's follow-up work
+  has a visible next step.
+- **Landing page**: new feature card "Track every application"
+  (clay-blush, Briefcase) describing the pipeline view, and the closing
+  hero line now mentions tracking from applied to interview. The landing
+  previously ended the story at auto-apply + watches; with `/tracker` the
+  whole loop (radar → tailor → apply → track) is represented.
+
+Verified: `convex dev --once` + `tsc -b --noEmit` 0, lint 0,
+**161/161 tests** (12 files) — no server changes this pass.
+
+---
+
 ## Resolved in the twenty-second pass (2026-10-07) — applications tracker
 
 - **`/tracker` (protected)**: a dedicated pipeline view over the radar's
