@@ -25,7 +25,6 @@ import { useEffect, Fragment, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { parseRadiusLocation } from "@/lib/geo";
-import { getSessionId } from "@/lib/session";
 import {
   addEmployerToQuery,
   EMPLOYER_CHIP_NAMES,
@@ -369,7 +368,6 @@ export function JobRadar({
         jobTitle: match.title,
         companyName: match.company,
         jobDescription: match.description,
-        sessionId: getSessionId(),
         boostKeywords: match.missingKeywords.slice(0, 20),
       });
       await markTailored({ jobId: match._id, score: result.score });
@@ -407,7 +405,6 @@ export function JobRadar({
     try {
       const applied = await autoApply({
         jobIds: ids as Array<JobMatch["_id"]>,
-        sessionId: getSessionId(),
       });
       if (applied.length === 0) {
         toast.error("Those listings were no longer available — refresh the board.");

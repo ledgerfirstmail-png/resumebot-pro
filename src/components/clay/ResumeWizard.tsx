@@ -22,7 +22,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
-import { getSessionId } from "@/lib/session";
 import {
   MAX_RESUME_FILE_BYTES,
   bytesToBase64,
@@ -275,7 +274,6 @@ export function ResumeWizard({
     try {
       const extracted = await extractJobPosting({
         url,
-        sessionId: getSessionId(),
       });
       jobForm.setValue("jobTitle", extracted.jobTitle, { shouldDirty: true });
       jobForm.setValue("companyName", extracted.companyName, {
@@ -355,7 +353,6 @@ export function ResumeWizard({
     try {
       const parsed = await parseResumeText({
         text,
-        sessionId: getSessionId(),
       });
       profileForm.reset(mergeFormValues(profileForm.getValues(), parsed));
       setResumeDraft("");
@@ -412,7 +409,6 @@ export function ResumeWizard({
         jobTitle: job.jobTitle,
         companyName: job.companyName,
         jobDescription: job.jobDescription,
-        sessionId: getSessionId(),
       });
 
       // Success — retire the local draft so a refresh starts clean. Every

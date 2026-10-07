@@ -25,7 +25,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { getSessionId } from "@/lib/session";
 import { profileLabel } from "@/lib/resumeSchemas";
 import type { ResumeProfileData } from "@/types/resume";
 
@@ -48,9 +47,8 @@ export default function Dashboard() {
     Doc<"resumeProfiles"> | null
   >(null);
   const [isDeletingProfile, setIsDeletingProfile] = useState(false);
-  // Stable session key for the usage chip (getSessionId is read-only).
-  const [sessionKey] = useState(() => getSessionId());
-  const usage = useQuery(api.aiUsage.usageSummary, { sessionId: sessionKey });
+  // Usage is keyed server-side to the signed-in account now — no client id.
+  const usage = useQuery(api.aiUsage.usageSummary, {});
   const saveResume = useMutation(api.resumes.saveResume);
   const tailorResume = useAction(api.ai.tailorResume);
   const generateKit = useAction(api.ai.generateApplicationKit);
@@ -327,7 +325,6 @@ export default function Dashboard() {
         jobTitle: result.jobTitle,
         companyName: result.companyName,
         jobDescription: result.jobDescription,
-        sessionId: getSessionId(),
         boostKeywords: result.result.missingKeywords,
       });
       setResult({ ...result, result: updated });
@@ -360,7 +357,6 @@ export default function Dashboard() {
         jobTitle: result.jobTitle,
         companyName: result.companyName,
         jobDescription: result.jobDescription,
-        sessionId: getSessionId(),
       });
       setKit(generated);
       toast.success(

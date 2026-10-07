@@ -67,16 +67,18 @@ interface CompletionUsage {
 }
 
 /**
- * Shared per-session daily budget — checked BEFORE any AI call so the
- * login-free endpoint can't drain integration credits.
+ * Shared daily budget — checked BEFORE any AI call so the open endpoint
+ * can't drain integration credits. The key is the signed-in account
+ * (unforgeable — the server resolves it, never the client), so clearing
+ * localStorage or replaying someone's session id buys nothing.
  */
 async function enforceDailyBudget(
   ctx: ActionCtx,
-  sessionId: string,
+  budgetKey: string,
 ): Promise<void> {
   const day = new Date().toISOString().slice(0, 10);
   const used = await ctx.runQuery(internal.aiUsage.getUsage, {
-    sessionId,
+    sessionId: budgetKey,
     day,
   });
   if (used >= MAX_AI_CALLS_PER_DAY) {
@@ -84,7 +86,10 @@ async function enforceDailyBudget(
       `Daily AI limit reached (${MAX_AI_CALLS_PER_DAY} runs per day). Your work is saved — try again tomorrow.`,
     );
   }
-  await ctx.runMutation(internal.aiUsage.recordCall, { sessionId, day });
+  await ctx.runMutation(internal.aiUsage.recordCall, {
+    sessionId: budgetKey,
+    day,
+  });
 }
 
 /**
@@ -277,7 +282,8 @@ interface TailorArgs {
   jobTitle: string;
   companyName: string;
   jobDescription: string;
-  sessionId: string;
+  /** Server-derived budget key ("user:<id>") — never client-supplied. */
+  budgetKey: string;
   boostKeywords?: string[];
 }
 
@@ -293,7 +299,7 @@ async function runTailor(
     jobTitle,
     companyName,
     jobDescription,
-    sessionId,
+    budgetKey,
     boostKeywords,
   }: TailorArgs,
 ): Promise<TailorResult> {
@@ -304,10 +310,9 @@ async function runTailor(
       .filter(Boolean)
       .slice(0, 20)
       .map((k) => k.slice(0, 80));
-    const sid = sessionId.trim().slice(0, 64) || "anonymous";
 
-    // Daily per-session budget so the open, login-free endpoint can't be drained.
-    await enforceDailyBudget(ctx, sid);
+    // Daily account-bound budget so a leaked deployment URL can't be drained.
+    await enforceDailyBudget(ctx, budgetKey);
 
     const startedAt = Date.now();
     const usage: CompletionUsage = {};
@@ -322,7 +327,7 @@ async function runTailor(
       );
     } catch (err) {
       await logAiRun(ctx, {
-        sessionId: sid,
+        sessionId: budgetKey,
         kind: "tailor",
         ok: false,
         error: err instanceof Error ? err.message : String(err),
@@ -410,7 +415,7 @@ async function runTailor(
       breakdown,
     };
     await logAiRun(ctx, {
-      sessionId: sid,
+      sessionId: budgetKey,
       kind: "tailor",
       ok: true,
       score: result.score,
@@ -426,10 +431,18 @@ export const tailorResume = action({
     jobTitle: v.string(),
     companyName: v.string(),
     jobDescription: v.string(),
-    sessionId: v.string(),
     boostKeywords: v.optional(v.array(v.string())),
   },
-  handler: async (ctx, args): Promise<TailorResult> => runTailor(ctx, args),
+  handler: async (ctx, args): Promise<TailorResult> => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error("You're signed out — sign in to continue.");
+    }
+    return runTailor(ctx, {
+      ...args,
+      budgetKey: `user:${userId}`,
+    });
+  },
 });
 
 /**
@@ -442,9 +455,8 @@ export const tailorResume = action({
 export const autoApply = action({
   args: {
     jobIds: v.array(v.id("jobMatches")),
-    sessionId: v.string(),
   },
-  handler: async (ctx, { jobIds, sessionId }) => {
+  handler: async (ctx, { jobIds }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) {
       throw new Error("You're signed out — sign in to continue.");
@@ -475,7 +487,7 @@ export const autoApply = action({
         jobTitle: match.title,
         companyName: match.company,
         jobDescription: match.description,
-        sessionId,
+        budgetKey: `user:${userId}`,
         // Feed the deterministic matcher's gaps straight into the rewrite.
         boostKeywords: match.missingKeywords,
       });
@@ -521,17 +533,20 @@ export const generateApplicationKit = action({
     jobTitle: v.string(),
     companyName: v.string(),
     jobDescription: v.string(),
-    sessionId: v.string(),
   },
   handler: async (
     ctx,
-    { profileJson, jobTitle, companyName, jobDescription, sessionId },
+    { profileJson, jobTitle, companyName, jobDescription },
   ): Promise<ApplicationKit> => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error("You're signed out — sign in to continue.");
+    }
+    const budgetKey = `user:${userId}`;
     const jd = jobDescription.slice(0, MAX_JOB_DESCRIPTION_CHARS);
     const pj = profileJson.slice(0, MAX_PROFILE_JSON_CHARS);
-    const sid = sessionId.trim().slice(0, 64) || "anonymous";
 
-    await enforceDailyBudget(ctx, sid);
+    await enforceDailyBudget(ctx, budgetKey);
 
     const startedAt = Date.now();
     const usage: CompletionUsage = {};
@@ -546,7 +561,7 @@ export const generateApplicationKit = action({
       );
     } catch (err) {
       await logAiRun(ctx, {
-        sessionId: sid,
+        sessionId: budgetKey,
         kind: "kit",
         ok: false,
         error: err instanceof Error ? err.message : String(err),
@@ -575,7 +590,7 @@ export const generateApplicationKit = action({
       answers,
     };
     await logAiRun(ctx, {
-      sessionId: sid,
+      sessionId: budgetKey,
       kind: "kit",
       ok: true,
       durationMs: Date.now() - startedAt,
@@ -648,18 +663,22 @@ export interface ExtractedPosting {
  * and the structured run log with tailoring.
  */
 export const extractJobPosting = action({
-  args: { url: v.string(), sessionId: v.string() },
-  handler: async (ctx, { url, sessionId }): Promise<ExtractedPosting> => {
-    const sid = sessionId.trim().slice(0, 64) || "anonymous";
+  args: { url: v.string() },
+  handler: async (ctx, { url }): Promise<ExtractedPosting> => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error("You're signed out — sign in to continue.");
+    }
+    const budgetKey = `user:${userId}`;
     const target = assertPublicHttpUrl(url);
 
-    await enforceDailyBudget(ctx, sid);
+    await enforceDailyBudget(ctx, budgetKey);
     const startedAt = Date.now();
     const usage: CompletionUsage = {};
 
     const fail = async (err: unknown): Promise<never> => {
       await logAiRun(ctx, {
-        sessionId: sid,
+        sessionId: budgetKey,
         kind: "extract",
         ok: false,
         error: err instanceof Error ? err.message : String(err),
@@ -727,7 +746,7 @@ export const extractJobPosting = action({
 
     const result: ExtractedPosting = { jobTitle, companyName, jobDescription };
     await logAiRun(ctx, {
-      sessionId: sid,
+      sessionId: budgetKey,
       kind: "extract",
       ok: true,
       durationMs: Date.now() - startedAt,
@@ -766,9 +785,13 @@ function buildParsePrompt(text: string) {
  * payload is normalized (and content-checked) by `normalizeParsedResume`.
  */
 export const parseResumeText = action({
-  args: { text: v.string(), sessionId: v.string() },
-  handler: async (ctx, { text, sessionId }): Promise<ProfileFormValues> => {
-    const sid = sessionId.trim().slice(0, 64) || "anonymous";
+  args: { text: v.string() },
+  handler: async (ctx, { text }): Promise<ProfileFormValues> => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error("You're signed out — sign in to continue.");
+    }
+    const budgetKey = `user:${userId}`;
     const source = text.trim();
     if (source.length < 120) {
       throw new Error(
@@ -777,13 +800,13 @@ export const parseResumeText = action({
     }
     const clipped = source.slice(0, MAX_RESUME_TEXT_CHARS);
 
-    await enforceDailyBudget(ctx, sid);
+    await enforceDailyBudget(ctx, budgetKey);
     const startedAt = Date.now();
     const usage: CompletionUsage = {};
 
     const fail = async (err: unknown): Promise<never> => {
       await logAiRun(ctx, {
-        sessionId: sid,
+        sessionId: budgetKey,
         kind: "parse",
         ok: false,
         error: err instanceof Error ? err.message : String(err),
@@ -816,7 +839,7 @@ export const parseResumeText = action({
     }
 
     await logAiRun(ctx, {
-      sessionId: sid,
+      sessionId: budgetKey,
       kind: "parse",
       ok: true,
       durationMs: Date.now() - startedAt,

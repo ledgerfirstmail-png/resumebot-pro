@@ -621,6 +621,30 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twenty-fourth pass (2026-10-07) — A1 closed: account-bound AI budget
+
+- **Every AI action now auth-gates and budgets on the signed-in account**:
+  `tailorResume`, `generateApplicationKit`, `extractJobPosting`, and
+  `parseResumeText` previously trusted a client-supplied `sessionId`
+  (localStorage, forgeable — clear it, get 25 fresh runs) and the
+  kit/extract/parse actions had **no auth check at all**. All four now
+  resolve the user via `getAuthUserId` (signed out → error), derive the
+  budget key server-side as `user:<id>`, and spend the shared
+  `MAX_AI_CALLS_PER_DAY` (25/day) against it. `autoApply` passes the same
+  server-derived key through `runTailor`. The client no longer sends any
+  session id; the dashboard's usage chip reads `usageSummary` (now
+  account-keyed, zeroed when signed out) instead of a localStorage key.
+  `lib/session.getSessionId` is now unused by app code (kept for any
+  future session-scope features). The `aiCalls`/`aiRuns` tables and their
+  session-keyed indexes are unchanged — old rows simply age out.
+
+Verified: `convex dev --once` + `tsc -b --noEmit` 0, lint 0,
+**161/161 tests** (12 files); CLI smoke: `ai.tailorResume` signed out →
+"You're signed out — sign in to continue.", `aiUsage.usageSummary` →
+zeroed summary.
+
+---
+
 ## Resolved in the twenty-third pass (2026-10-07) — tracker discovery & landing refresh
 
 - **Radar → tracker cross-link**: the results toolbar gained a Tracker

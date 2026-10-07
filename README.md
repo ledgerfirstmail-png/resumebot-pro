@@ -40,8 +40,8 @@ All relevant files live in the 'src' directory.
 Use bun for the package manager.
 
 Key source files:
-- `src/convex/ai.ts` — tailoring + application-kit + job-URL import actions (rate-limited, input-capped, one retry)
-- `src/convex/aiUsage.ts` — daily per-session AI budget + structured AI run log
+- `src/convex/ai.ts` — tailoring + application-kit + job-URL import actions (account-gated, per-account daily budget, input-capped, one retry)
+- `src/convex/aiUsage.ts` — daily per-account AI budget + structured AI run log
 - `src/convex/integrations.ts` — connections status + live tests for the LLM gateway, Resend email, and Telegram (feeds the `/settings` Connections card)
 - `src/convex/accountDeletion.ts` — irreversible delete-account mutation: owned rows (profiles, tailored resumes, radar matches, watches) + the ConvexAuth cascade (sessions → refresh tokens/verifiers → verification codes → accounts → user)
 - `src/convex/jobSearch.ts` — Job Radar search: 13 key-free sources, deterministic scoring, radius scan (geocoded distance filter), hourly watch sweep
@@ -101,7 +101,8 @@ Tailorly ships **user name + password authentication** via Convex Auth:
 - All resume data is **scoped per signed-in user** (`userId` on
   `resumeProfiles`/`tailoredResumes`, enforced in `src/convex/resumes.ts`);
   signed-out queries return null/[] and mutations throw.
-- The anonymous per-session AI budget in `src/convex/aiUsage.ts` (25 runs/day)
+- The per-account daily AI budget in `src/convex/aiUsage.ts` (25 runs/day,
+  keyed server-side to the signed-in user — not a client-supplied id)
   still applies on top of auth.
 
 Note: reset emails go through `auth.freebuff.app` (configured by the platform).

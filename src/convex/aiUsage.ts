@@ -1,3 +1,4 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import {
   internalMutation,
@@ -111,14 +112,28 @@ export const recentRuns = internalQuery({
 });
 
 /**
- * Today's AI usage for one browser session — surfaced in the dashboard so
+ * Today's AI usage for the signed-in account — surfaced in the dashboard so
  * the daily budget is visible instead of a surprise (E7 remainder): calls
  * used vs. the limit, run counts/failures, and token/credit spend over the
- * last 24 hours from the structured run log.
+ * last 24 hours from the structured run log. Keyed by the account's budget
+ * key (server-derived), so one browser can't read another's spend.
  */
 export const usageSummary = query({
-  args: { sessionId: v.string() },
-  handler: async (ctx, { sessionId }) => {
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      return {
+        usedToday: 0,
+        limit: MAX_AI_CALLS_PER_DAY,
+        runsToday: 0,
+        failuresToday: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        credits: 0,
+      };
+    }
+    const sessionId = `user:${userId}`;
     const day = new Date().toISOString().slice(0, 10);
     const record = await ctx.db
       .query("aiCalls")
