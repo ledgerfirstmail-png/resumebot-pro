@@ -621,6 +621,32 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twenty-first pass (2026-10-07) — account deletion
+
+- **Delete account** (the last small gap from the 2026-10-07 audit): a
+  danger-zone card at the bottom of `/settings` — type "DELETE" to confirm,
+  then `convex/accountDeletion.deleteAccount` (owner-checked) wipes every
+  owned row (`tailoredResumes`, `resumeProfiles`, `jobMatches`,
+  `jobWatches`), the ConvexAuth cascade (each `authSession`'s
+  `authRefreshTokens` + `authVerifiers`, each `authAccount`'s
+  `authVerificationCodes`, the accounts, the sessions), and finally the
+  `users` row. Shared caches (`geoCache`) and anonymous budget rows
+  (`aiCalls`/`aiRuns`, keyed by client session id, not account) stay.
+  After the mutation returns, the client calls `signOut()` (best-effort —
+  the session rows are already gone) and navigates to `/`.
+  Irreversible by design; the card tells users to download PDFs first.
+- Audit corrections: saved resumes already de-duplicate (persistResume
+  replaces per job+company), draft persistence / JD caps / AI budget /
+  retry / dark toggle / a11y labels / CI were already built in earlier
+  passes — the stale ROADMAP lists in section A–E were written before
+  passes 12–20 landed.
+
+Verified: `convex dev --once` + `tsc -b --noEmit` 0, lint 0,
+**153/153 tests** (11 files); CLI smoke of `deleteAccount` auth-gates
+("You're signed out."). Signed-in delete click-through awaits browser use.
+
+---
+
 ## Resolved in the twentieth pass (2026-10-06) — connections settings, 35-mile local scan, refresh button
 
 - **Connections settings ("connect emails and LLMs")**: new

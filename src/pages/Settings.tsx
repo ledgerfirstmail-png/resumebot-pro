@@ -1,9 +1,10 @@
+import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "@/convex/_generated/api";
 import type { IntegrationStatus } from "@/convex/integrations";
 import { AppHeader } from "@/components/clay/AppHeader";
 import { ClayButton } from "@/components/clay/ClayButton";
 import { ClayCard } from "@/components/clay/ClayCard";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import {
   Bot,
   Check,
@@ -14,9 +15,11 @@ import {
   PlugZap,
   RefreshCw,
   Send,
+  Trash2,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { toast } from "sonner";
 
 const FIELD_INPUT =
@@ -388,6 +391,75 @@ function ConnectionsCard() {
  * signed-in user's own password. Other sessions are signed out on change;
  * this one stays signed in.
  */
+/** Danger zone: type-to-confirm, then wipe every owned row + auth rows. */
+function DangerZoneCard() {
+  const deleteAccount = useMutation(api.accountDeletion.deleteAccount);
+  const { signOut } = useAuthActions();
+  const navigate = useNavigate();
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteAccount({});
+      toast.success("Account deleted — all of your data was removed.");
+      // The session rows are already gone server-side; signOut just clears
+      // the local token and may be a no-op or throw — never block navigation.
+      try {
+        await signOut();
+      } catch {
+        // Session already invalidated by the deletion.
+      }
+      navigate("/");
+    } catch (err) {
+      setDeleting(false);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Couldn't delete the account — try again.",
+      );
+    }
+  };
+
+  return (
+    <ClayCard>
+      <div className="flex items-center gap-2">
+        <Trash2 className="size-4 text-rose-600" />
+        <h2 className="clay-title text-lg">Delete account</h2>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Permanently removes your profiles, tailored resumes, saved jobs, and
+        radar watches, then this sign-in itself. There is no undo and no
+        export afterward — download any resume PDF you still want first.
+      </p>
+      <label className="mt-4 flex flex-col gap-1.5">
+        <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+          Type DELETE to confirm
+        </span>
+        <input
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          disabled={deleting}
+          aria-label="Type DELETE to confirm account deletion"
+          placeholder="DELETE"
+          autoComplete="off"
+          className="clay-inset h-11 rounded-2xl px-4 text-sm font-bold tracking-wider outline-none placeholder:text-muted-foreground/50 focus-visible:ring-4 focus-visible:ring-ring/30"
+        />
+      </label>
+      <ClayButton
+        variant="soft"
+        className="mt-3 bg-rose-100 text-rose-700 hover:bg-rose-200"
+        disabled={deleting || confirmText.trim().toUpperCase() !== "DELETE"}
+        onClick={() => void handleDelete()}
+      >
+        {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+        {deleting ? "Deleting…" : "Delete my account"}
+      </ClayButton>
+    </ClayCard>
+  );
+}
+
 export default function Settings() {
   const user = useQuery(api.users.currentUser);
   const changePassword = useAction(api.accounts.changePassword);
@@ -529,6 +601,8 @@ export default function Settings() {
               </ClayButton>
             </form>
           </ClayCard>
+
+          <DangerZoneCard />
         </div>
       </main>
     </div>

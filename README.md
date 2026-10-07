@@ -13,7 +13,9 @@ Routes:
   → generator → result → saved collection. Signed-out visitors are redirected
   to `/auth?returnTo=/dashboard`.
 - `/settings` — account settings (protected): integrations (LLM / email /
-  Telegram connections with one-click live tests) and change password.
+  Telegram connections with one-click live tests), change password, and a
+  type-to-confirm **Delete account** card (wipes profiles, resumes, jobs,
+  watches + the auth rows).
 - `/r/<slug>` — public, read-only view of a shared resume.
 
 Tech stack:
@@ -37,6 +39,7 @@ Key source files:
 - `src/convex/ai.ts` — tailoring + application-kit + job-URL import actions (rate-limited, input-capped, one retry)
 - `src/convex/aiUsage.ts` — daily per-session AI budget + structured AI run log
 - `src/convex/integrations.ts` — connections status + live tests for the LLM gateway, Resend email, and Telegram (feeds the `/settings` Connections card)
+- `src/convex/accountDeletion.ts` — irreversible delete-account mutation: owned rows (profiles, tailored resumes, radar matches, watches) + the ConvexAuth cascade (sessions → refresh tokens/verifiers → verification codes → accounts → user)
 - `src/convex/jobSearch.ts` — Job Radar search: 13 key-free sources, deterministic scoring, radius scan (geocoded distance filter), hourly watch sweep
 - `src/lib/geo.ts` — radius-chip parsing, haversine, Nominatim response parsing (pure; vitest-covered)
 - `src/convex/auth/usernamePassword.ts` — Tailorly's user name + password auth provider (sign up / sign in / email reset)
