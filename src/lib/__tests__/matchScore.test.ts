@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isUsFocusedPosting,
   locationTerms,
   matchProfileToPosting,
   matchesLocation,
@@ -235,5 +236,45 @@ describe("matchesLocation (US states & cities)", () => {
     expect(US_STATE_NAMES).toContain("Texas");
     expect(US_STATE_NAMES).toContain("District of Columbia");
     expect(US_STATE_NAMES[0]).toBe("Alabama");
+  });
+});
+
+describe("US-focus filter", () => {
+  it("keeps postings with clear US evidence", () => {
+    expect(isUsFocusedPosting("Columbus, OH")).toBe(true);
+    expect(isUsFocusedPosting("Austin, Texas")).toBe(true);
+    expect(isUsFocusedPosting("43215")).toBe(true);
+    expect(isUsFocusedPosting("Boulder CO 80301-1234")).toBe(true);
+    expect(isUsFocusedPosting("Remote — US only")).toBe(true);
+    expect(isUsFocusedPosting("New York, United States")).toBe(true);
+  });
+
+  it("keeps ambiguous labels rather than guessing wrong", () => {
+    expect(isUsFocusedPosting("Unspecified")).toBe(true);
+    expect(isUsFocusedPosting("Hybrid")).toBe(true);
+    expect(isUsFocusedPosting("Perth")).toBe(true); // could be Perth Amboy, NJ
+    expect(isUsFocusedPosting("Paris")).toBe(true); // could be Paris, TX
+  });
+
+  it("drops postings named outside the US", () => {
+    expect(isUsFocusedPosting("London, UK")).toBe(false);
+    expect(isUsFocusedPosting("Berlin, Germany")).toBe(false);
+    expect(isUsFocusedPosting("Toronto, Ontario, Canada")).toBe(false);
+    expect(isUsFocusedPosting("Vancouver, British Columbia")).toBe(false);
+    expect(isUsFocusedPosting("Dublin, Ireland")).toBe(false);
+    expect(isUsFocusedPosting("Amsterdam, Netherlands (EU only)")).toBe(false);
+    expect(isUsFocusedPosting("Remote — Europe")).toBe(false);
+    expect(isUsFocusedPosting("Sydney, Australia")).toBe(false);
+  });
+
+  it("lets US evidence win over a shared city name", () => {
+    expect(isUsFocusedPosting("Paris, TX")).toBe(true);
+    expect(isUsFocusedPosting("Perth Amboy, NJ")).toBe(true);
+  });
+
+  it("always keeps rows sourced from US-only employers", () => {
+    for (const source of ["tacobell", "winco", "workday"]) {
+      expect(isUsFocusedPosting("London, UK", source)).toBe(true);
+    }
   });
 });

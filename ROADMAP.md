@@ -621,6 +621,28 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twenty-fifth pass (2026-10-07) — US-focused scan
+
+- **The radar now filters to US employers**: user request — "focus scan
+  on US businesses." New pure predicate `matchScore.isUsFocusedPosting`
+  (5 vitest cases): US-employer sources (tacobell/winco/workday) always
+  pass; otherwise US evidence (ZIP/ZIP+4, US state name or abbr via the
+  existing `namesUsPlace`, USA terms) wins first — so "Paris, TX" and
+  "Perth Amboy, NJ" survive shared foreign city names; then explicit
+  non-US countries/regions lose (UK, Canada incl. Ontario/BC/Quebec
+  provinces and major metros, Germany, France, Netherlands, Ireland,
+  Australia, "Europe/EMEA/APAC/LATAM", "EU only", etc.) — checked
+  **before** the remote/anywhere pass so "Remote — Europe" doesn't sneak
+  through; plain remote/worldwide/ambiguous labels stay rather than
+  guessing wrong (unhelpful board labels are kept so searches don't come
+  back empty). Wired into `gatherPostings` ahead of the location
+  pre-filter, so both `searchJobs` and the hourly watch sweep honor it.
+
+Verified: vitest **166/166** (12 files, 5 new cases); `convex dev
+--once` + `tsc -b --noEmit` 0, lint 0.
+
+---
+
 ## Resolved in the twenty-fourth pass (2026-10-07) — A1 closed: account-bound AI budget
 
 - **Every AI action now auth-gates and budgets on the signed-in account**:

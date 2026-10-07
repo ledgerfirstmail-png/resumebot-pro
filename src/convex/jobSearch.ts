@@ -19,6 +19,7 @@ import {
   matchProfileToPosting,
   matchesLocation,
   isAnywhere,
+  isUsFocusedPosting,
   STOPWORDS,
   tokenize,
   type MatchProfile,
@@ -675,6 +676,12 @@ async function gatherPostings(
       return hits >= needed;
     });
   }
+
+  // US focus: businesses hiring in the United States. Sourced US employers
+  // pass regardless; worldwide boards keep postings with US evidence (state,
+  // ZIP, USA term) or an ambiguous city label, and drop explicitly
+  // non-US ones ("London, UK", "Berlin, DE", "Toronto").
+  postings = postings.filter((p) => isUsFocusedPosting(p.location, p.source));
 
   // Locations: the user may pick several at once — a listing passes when it
   // is open to the whole world or mentions ANY requested term. When a radius

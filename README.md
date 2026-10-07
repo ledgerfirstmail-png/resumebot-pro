@@ -44,7 +44,7 @@ Key source files:
 - `src/convex/aiUsage.ts` — daily per-account AI budget + structured AI run log
 - `src/convex/integrations.ts` — connections status + live tests for the LLM gateway, Resend email, and Telegram (feeds the `/settings` Connections card)
 - `src/convex/accountDeletion.ts` — irreversible delete-account mutation: owned rows (profiles, tailored resumes, radar matches, watches) + the ConvexAuth cascade (sessions → refresh tokens/verifiers → verification codes → accounts → user)
-- `src/convex/jobSearch.ts` — Job Radar search: 13 key-free sources, deterministic scoring, radius scan (geocoded distance filter), hourly watch sweep
+- `src/convex/jobSearch.ts` — Job Radar search: 13 key-free sources, US-focus filter, deterministic scoring, radius scan (geocoded distance filter), hourly watch sweep
 - `src/lib/tracker.ts` + `src/components/clay/TrackerBoard.tsx` — pipeline tracker logic and UI (`/tracker`)
 - `src/lib/geo.ts` — radius-chip parsing, haversine, Nominatim response parsing (pure; vitest-covered)
 - `src/convex/auth/usernamePassword.ts` — Tailorly's user name + password auth provider (sign up / sign in / email reset)
@@ -128,7 +128,12 @@ status and runs one-click tests against each:
 
 # Job Radar — radius scan
 
-The radar scans 13 key-free boards. Location handling:
+The radar scans 13 key-free boards, **focused on US employers** — postings
+sourced from US-only feeds (Taco Bell, WinCo, Workday US sites) pass
+as-is; worldwide boards keep listings with US evidence (a state name or
+abbreviation, a ZIP, a USA term) or an ambiguous label, and drop ones that
+name another country or region ("London, UK", "Berlin, DE", "Remote —
+Europe", "Toronto"). Location handling:
 
 - Plain chips ("Remote", "Ohio", "43215") use any-of text matching
   (`src/lib/matchScore.ts`): state names and abbreviations are

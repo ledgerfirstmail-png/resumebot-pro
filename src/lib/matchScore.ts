@@ -345,3 +345,88 @@ export function matchesLocation(
     );
   });
 }
+
+/** Explicit non-US countries/regions a posting may name (lowercase). */
+const NON_US_MARKERS = [
+  "united kingdom",
+  "england",
+  "scotland",
+  "wales",
+  "northern ireland",
+  "ireland",
+  "canada",
+  "mexico",
+  "germany",
+  "france",
+  "spain",
+  "italy",
+  "netherlands",
+  "belgium",
+  "switzerland",
+  "austria",
+  "poland",
+  "portugal",
+  "sweden",
+  "norway",
+  "denmark",
+  "finland",
+  "india",
+  "philippines",
+  "australia",
+  "new zealand",
+  "brazil",
+  "argentina",
+  "japan",
+  "singapore",
+  "south africa",
+  "europe",
+  "emea",
+  "apac",
+  "latam",
+  "eu only",
+  "london",
+  "paris, france",
+  "ontario",
+  "british columbia",
+  "quebec",
+  "toronto",
+  "vancouver",
+  "berlin",
+  "munich",
+  "amsterdam",
+  "dublin",
+  "sydney",
+  "melbourne",
+];
+
+/** ZIP or ZIP+4 anywhere in the string is a strong US marker. */
+const US_ZIP_RE = /\b\d{5}(?:-\d{4})?\b/;
+
+/**
+ * Whether a posting's location points at a US workplace — the US-focus
+ * filter for the radar scan. US evidence wins first (a "Paris, TX" or
+ * "Perth Amboy, NJ" must survive); then explicit non-US countries/regions
+ * lose; ambiguous strings stay (remote boards label most US roles as bare
+ * cities, and unhelpful labels are kept so searches return nothing only
+ * when there's real evidence). Sourced rows the boards identify as
+ * US-only (Taco Bell, WinCo, Workday US employers) pass regardless.
+ */
+export function isUsFocusedPosting(
+  postLocation: string,
+  source?: string,
+): boolean {
+  if (source === "tacobell" || source === "winco" || source === "workday") {
+    return true;
+  }
+  const pl = postLocation.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!pl) return true;
+  // US evidence wins first — "Remote — US only" and "Paris, TX" stay.
+  if (US_ZIP_RE.test(pl)) return true;
+  if (namesUsPlace(pl, pl.split(/[^a-z0-9]+/).filter(Boolean))) return true;
+  // Then explicit non-US countries/regions lose — even on remote postings
+  // ("Remote — Europe" is region-restricted, not a US option).
+  if (NON_US_MARKERS.some((m) => pl.includes(m))) return false;
+  // Plain remote/worldwide/ambiguous labels stay (US evidence wins over a
+  // shared city name: "paris" alone could be Paris, TX).
+  return true;
+}
