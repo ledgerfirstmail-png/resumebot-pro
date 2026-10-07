@@ -16,6 +16,7 @@ const Landing = lazy(() => import("./pages/Landing.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Auth = lazy(() => import("./pages/Auth.tsx"));
 const Settings = lazy(() => import("./pages/Settings.tsx"));
+const Tracker = lazy(() => import("./pages/Tracker.tsx"));
 const SharedResume = lazy(() => import("./pages/SharedResume.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
@@ -113,6 +114,14 @@ createRoot(document.getElementById("root")!).render(
                   element={
                     <RequireAuth>
                       <Settings />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/tracker"
+                  element={
+                    <RequireAuth>
+                      <Tracker />
                     </RequireAuth>
                   }
                 />

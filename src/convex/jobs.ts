@@ -165,7 +165,9 @@ export const listMatches = query({
 /**
  * Move a listing through the pipeline by hand (E3 remainder): tailored →
  * applied → interview → rejected. Owner-checked; re-scans never touch a
- * non-"new" status, so manual progress survives the next search.
+ * non-"new" status, so manual progress survives the next search. Marking
+ * applied stamps appliedAt (the tracker sorts on it); restoring to "new"
+ * clears it again.
  */
 export const setJobStatus = mutation({
   args: {
@@ -187,8 +189,34 @@ export const setJobStatus = mutation({
     if (!doc || doc.userId !== userId) {
       throw new Error("Listing not found.");
     }
-    await ctx.db.patch(jobId, { status });
+    await ctx.db.patch(jobId, {
+      status,
+      ...(status === "applied" && doc.appliedAt === undefined
+        ? { appliedAt: Date.now() }
+        : {}),
+      ...(status === "new" && doc.appliedAt !== undefined
+        ? { appliedAt: undefined }
+        : {}),
+    });
     return status;
+  },
+});
+
+/**
+ * The owner's whole pipeline for the tracker view (pass 22): every match,
+ * any status, newest-first — unlike listMatches, which ranks by score for
+ * the discovery list. The page groups/sorts via lib/tracker.
+ */
+export const listTracker = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    return await ctx.db
+      .query("jobMatches")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .take(200);
   },
 });
 

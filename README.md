@@ -16,6 +16,10 @@ Routes:
   Telegram connections with one-click live tests), change password, and a
   type-to-confirm **Delete account** card (wipes profiles, resumes, jobs,
   watches + the auth rows).
+- `/tracker` (protected) — Applications tracker: every radar listing by
+  pipeline stage (new → tailored → applied → interview → rejected) with
+  counts, applied dates, and manual stage moves (`lib/tracker` holds the
+  pure grouping/sorting; `convex/jobs.listTracker` the query).
 - `/r/<slug>` — public, read-only view of a shared resume.
 
 Tech stack:
@@ -41,6 +45,7 @@ Key source files:
 - `src/convex/integrations.ts` — connections status + live tests for the LLM gateway, Resend email, and Telegram (feeds the `/settings` Connections card)
 - `src/convex/accountDeletion.ts` — irreversible delete-account mutation: owned rows (profiles, tailored resumes, radar matches, watches) + the ConvexAuth cascade (sessions → refresh tokens/verifiers → verification codes → accounts → user)
 - `src/convex/jobSearch.ts` — Job Radar search: 13 key-free sources, deterministic scoring, radius scan (geocoded distance filter), hourly watch sweep
+- `src/lib/tracker.ts` + `src/components/clay/TrackerBoard.tsx` — pipeline tracker logic and UI (`/tracker`)
 - `src/lib/geo.ts` — radius-chip parsing, haversine, Nominatim response parsing (pure; vitest-covered)
 - `src/convex/auth/usernamePassword.ts` — Tailorly's user name + password auth provider (sign up / sign in / email reset)
 - `src/convex/resumes.ts` — per-user profile upsert + saved resumes (de-duplicating save)

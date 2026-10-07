@@ -621,6 +621,33 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twenty-second pass (2026-10-07) — applications tracker
+
+- **`/tracker` (protected)**: a dedicated pipeline view over the radar's
+  saved listings — status tabs (All / Applied / Interview / Rejected /
+  Tailored / New) with live counts, rows showing board score chip, status
+  pill, first-seen date, applied date, and tailored score, plus manual
+  stage moves (Applied / Interview / Rejected / Restore) reusing the same
+  owner-checked `jobs.setJobStatus` mutation as the radar's inline
+  controls. Empty and loading states styled to the clay theme; the route
+  is `RequireAuth`-wrapped and linked from the app header (Briefcase
+  icon).
+  - Pure grouping/sorting lives in **`lib/tracker.ts`** (vitest-covered,
+    8 new cases): newest-activity-first ordering (appliedAt for
+    applications, else first-seen) with score/title tiebreaks and no input
+    mutation; tab filtering and per-tab counts.
+  - Server: **`jobs.listTracker`** returns every match (newest-first,
+    cap 200) unlike the score-ranked radar list; **`setJobStatus` now
+    maintains `appliedAt`** — stamps it on a manual "applied" (previously
+    only auto-apply did) and clears it on restore to "new", so the
+    tracker's activity ordering stays truthful.
+
+Verified: `convex dev --once` + `tsc -b --noEmit` 0, lint 0,
+**161/161 tests** (12 files). Signed-in tracker click-through awaits
+browser use like the rest of the app surface.
+
+---
+
 ## Resolved in the twenty-first pass (2026-10-07) — account deletion
 
 - **Delete account** (the last small gap from the 2026-10-07 audit): a
