@@ -41,10 +41,12 @@ import type { Id } from "./_generated/dataModel";
 
 /**
  * Job Radar search (feature: "find employers that are hiring and score the
- * resume for a match"). Aggregates five key-free job boards plus the local
+ * resume for a match"). Aggregates key-free job boards plus the local
  * retail/food employer feeds — Workday career sites (Walmart, Home Depot,
  * Lowe's, Target, Chipotle, Dollar Tree), Taco Bell's WordPress/JSON-LD list,
- * and WinCo's iCims view — then filters to the query and locations and scores
+ * and WinCo's iCims view — then filters strictly to **US listings**
+ * (isUsFocusedPosting: US-only sources pass as-is; every other row needs US
+ * evidence in its location) and to the query and locations, and scores
  * every listing against the owner's profile with the pure deterministic
  * matcher — no AI credits spent on search. The hourly watch sweep reuses the
  * same pipeline and pushes new matches out by email and Telegram (see
@@ -293,39 +295,6 @@ async function fetchJobicy(): Promise<RawPosting[]> {
         location: str(j.jobGeo) || "Remote",
         postedAt: parseDate(j.pubDate),
         tags: jobType ? [jobType] : [],
-      },
-    ];
-  });
-}
-
-/** Arbeitnow — general job board feed, filtered locally by query. */
-async function fetchArbeitnow(): Promise<RawPosting[]> {
-  const data = (await fetchJson(
-    "https://www.arbeitnow.com/api/job-board-api?page=1",
-  )) as { data?: unknown[] };
-  return (data.data ?? []).flatMap((entry) => {
-    const j = (entry ?? {}) as Record<string, unknown>;
-    const title = str(j.title);
-    const slug = str(j.slug);
-    const directUrl = str(j.url);
-    if (!title || (!slug && !directUrl)) return [];
-    return [
-      {
-        source: "arbeitnow",
-        externalId: slug || directUrl,
-        title,
-        company: str(j.company_name) || "Unknown company",
-        description: htmlToText(str(j.description)).slice(
-          0,
-          MAX_DESCRIPTION_CHARS,
-        ),
-        url:
-          directUrl || `https://www.arbeitnow.com/jobs/${slug.replace(/_/g, "-")}`,
-        location: j.remote === true ? "Remote" : str(j.location) || "Unspecified",
-        postedAt: parseDate(j.posted_at ?? j.created_at),
-        tags: Array.isArray(j.tags)
-          ? j.tags.filter((t): t is string => typeof t === "string")
-          : [],
       },
     ];
   });
@@ -656,7 +625,6 @@ async function gatherPostings(
   const tasks: Array<{ name: string; run: () => Promise<RawPosting[]> }> = [
     { name: "remotive", run: () => fetchRemotive(query) },
     { name: "remoteok", run: () => fetchRemoteOk() },
-    { name: "arbeitnow", run: () => fetchArbeitnow() },
     { name: "muse", run: () => fetchTheMuse() },
     { name: "jobicy", run: () => fetchJobicy() },
     { name: "weworkremotely", run: () => fetchWeWorkRemotely() },

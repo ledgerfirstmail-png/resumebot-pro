@@ -250,14 +250,7 @@ describe("US-focus filter", () => {
     expect(isUsFocusedPosting("New York, United States")).toBe(true);
   });
 
-  it("keeps ambiguous labels rather than guessing wrong", () => {
-    expect(isUsFocusedPosting("Unspecified")).toBe(true);
-    expect(isUsFocusedPosting("Hybrid")).toBe(true);
-    expect(isUsFocusedPosting("Perth")).toBe(true); // could be Perth Amboy, NJ
-    expect(isUsFocusedPosting("Paris")).toBe(true); // could be Paris, TX
-  });
-
-  it("drops postings named outside the US", () => {
+  it("drops postings named outside the US and unlabeled rows", () => {
     expect(isUsFocusedPosting("London, UK")).toBe(false);
     expect(isUsFocusedPosting("Berlin, Germany")).toBe(false);
     expect(isUsFocusedPosting("Toronto, Ontario, Canada")).toBe(false);
@@ -266,6 +259,15 @@ describe("US-focus filter", () => {
     expect(isUsFocusedPosting("Amsterdam, Netherlands (EU only)")).toBe(false);
     expect(isUsFocusedPosting("Remote — Europe")).toBe(false);
     expect(isUsFocusedPosting("Sydney, Australia")).toBe(false);
+    // Strict mode: ambiguity is now treated as non-US evidence.
+    expect(isUsFocusedPosting("Remote")).toBe(false);
+    expect(isUsFocusedPosting("Anywhere in the World")).toBe(false);
+    expect(isUsFocusedPosting("Worldwide")).toBe(false);
+    expect(isUsFocusedPosting("Unspecified")).toBe(false);
+    expect(isUsFocusedPosting("Hybrid")).toBe(false);
+    expect(isUsFocusedPosting("Perth")).toBe(false); // could be Perth Amboy, NJ, but unproven
+    expect(isUsFocusedPosting("Paris")).toBe(false); // could be Paris, TX, but unproven
+    expect(isUsFocusedPosting("")).toBe(false);
   });
 
   it("lets US evidence win over a shared city name", () => {

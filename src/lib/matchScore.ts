@@ -298,10 +298,29 @@ const USA_TERMS = new Set([
   "united states of america",
 ]);
 
+/** State abbreviations that double as common English words ("in", "or",
+ * "me"…) — as bare tokens they'd read ordinary text as US evidence
+ * ("Anywhere in the World" → Indiana), so they only count when anchored
+ * after a comma/colon (", ID", ": HI"). */
+const WORDLIKE_STATE_ABBRS = new Set([
+  "in", "or", "me", "ok", "hi", "la", "pa", "ma", "de", "id", "al",
+]);
+const WORDLIKE_ABBR_ANCHOR_RE = new RegExp(
+  `[,:]\\s*(${[...WORDLIKE_STATE_ABBRS].join("|")})\\b`,
+  "i",
+);
+
 /** A posting locates a US place when it names a state or the country. */
 function namesUsPlace(pl: string, tokens: string[]): boolean {
-  if (/\busa\b|\bunited states\b|\bamerica\b/.test(pl)) return true;
-  if (tokens.some((t) => US_ABBR_TOKENS.has(t))) return true;
+  if (/\busa\b|\bunited states\b|\bamerica\b|\bus\b/.test(pl)) return true;
+  if (
+    tokens.some(
+      (t) => US_ABBR_TOKENS.has(t) && !WORDLIKE_STATE_ABBRS.has(t),
+    ) ||
+    WORDLIKE_ABBR_ANCHOR_RE.test(pl)
+  ) {
+    return true;
+  }
   // Full state names without an abbreviation ("Austin, Texas",
   // "Portland, Oregon") — substring check so multi-word states like
   // "new hampshire" match regardless of tokenization.
@@ -346,70 +365,19 @@ export function matchesLocation(
   });
 }
 
-/** Explicit non-US countries/regions a posting may name (lowercase). */
-const NON_US_MARKERS = [
-  "united kingdom",
-  "england",
-  "scotland",
-  "wales",
-  "northern ireland",
-  "ireland",
-  "canada",
-  "mexico",
-  "germany",
-  "france",
-  "spain",
-  "italy",
-  "netherlands",
-  "belgium",
-  "switzerland",
-  "austria",
-  "poland",
-  "portugal",
-  "sweden",
-  "norway",
-  "denmark",
-  "finland",
-  "india",
-  "philippines",
-  "australia",
-  "new zealand",
-  "brazil",
-  "argentina",
-  "japan",
-  "singapore",
-  "south africa",
-  "europe",
-  "emea",
-  "apac",
-  "latam",
-  "eu only",
-  "london",
-  "paris, france",
-  "ontario",
-  "british columbia",
-  "quebec",
-  "toronto",
-  "vancouver",
-  "berlin",
-  "munich",
-  "amsterdam",
-  "dublin",
-  "sydney",
-  "melbourne",
-];
-
 /** ZIP or ZIP+4 anywhere in the string is a strong US marker. */
 const US_ZIP_RE = /\b\d{5}(?:-\d{4})?\b/;
 
 /**
- * Whether a posting's location points at a US workplace — the US-focus
- * filter for the radar scan. US evidence wins first (a "Paris, TX" or
- * "Perth Amboy, NJ" must survive); then explicit non-US countries/regions
- * lose; ambiguous strings stay (remote boards label most US roles as bare
- * cities, and unhelpful labels are kept so searches return nothing only
- * when there's real evidence). Sourced rows the boards identify as
- * US-only (Taco Bell, WinCo, Workday US employers) pass regardless.
+ * Whether a posting's location points at a US workplace — the strict US-only
+ * filter for the radar scan: a listing stays only when the board itself
+ * marks it US-only (Taco Bell, WinCo, Workday US employers) or the location
+ * carries US evidence — a state name/abbreviation, a ZIP, or a USA term
+ * ("United States", "USA"). Shared city names only survive when US evidence
+ * is present ("Paris, TX"); anything else — "London", "Toronto", bare
+ * world-remote labels ("Remote", "Anywhere in the World"), and unlabeled
+ * rows — is treated as non-US and dropped, so no foreign listing can slip
+ * through.
  */
 export function isUsFocusedPosting(
   postLocation: string,
@@ -419,16 +387,10 @@ export function isUsFocusedPosting(
     return true;
   }
   const pl = postLocation.toLowerCase().replace(/\s+/g, " ").trim();
-  if (!pl) return true;
+  if (!pl) return false;
   // US evidence wins first — "Remote — US only" and "Paris, TX" stay.
   if (US_ZIP_RE.test(pl)) return true;
-  if (namesUsPlace(pl, pl.split(/[^a-z0-9]+/).filter(Boolean))) return true;
-  // Then explicit non-US countries/regions lose — even on remote postings
-  // ("Remote — Europe" is region-restricted, not a US option).
-  if (NON_US_MARKERS.some((m) => pl.includes(m))) return false;
-  // Plain remote/worldwide/ambiguous labels stay (US evidence wins over a
-  // shared city name: "paris" alone could be Paris, TX).
-  return true;
+  return namesUsPlace(pl, pl.split(/[^a-z0-9]+/).filter(Boolean));
 }
 
 /** Separators boards use between several duty locations on one posting.

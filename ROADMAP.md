@@ -621,6 +621,24 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twenty-seventh pass (2026-10-08) — strict USA-only listings
+
+**Requested:** "remove all other countries and focus on USA, United States
+America listings only".
+
+- `isUsFocusedPosting` went strict: ambiguous locations no longer auto-pass.
+  A non-US-sourced listing stays only with US evidence — state name, state
+  abbreviation, ZIP, or USA term ("US" now counts; word-like abbreviations
+  such as "in"/"or" only when comma-anchored, so "Anywhere in the World" no
+  longer reads as Indiana). Bare "Remote", "Worldwide", "Unspecified",
+  "Hybrid", unlabeled rows, and evidence-free city names ("Paris", "Perth",
+  "London") are all dropped; "Paris, TX" still survives on its US evidence.
+- Arbeitnow removed from the scan (predominantly non-US feed with unlabeled
+  remote rows) — fetcher and task dropped, not filtered after the fact.
+- Tests updated to the strict contract (unlabeled rows → false, shared-city
+  exception kept) and two real bugs the strictness exposed were fixed in
+  `namesUsPlace`, not by weakening assertions.
+
 ## Resolved in the twenty-sixth pass (2026-10-08) — wider scan: career pages, boards, local listings, relevant-location display
 
 **Requested:** "add functions to search career pages, job listings, local

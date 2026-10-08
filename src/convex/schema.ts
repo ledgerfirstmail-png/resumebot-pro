@@ -165,7 +165,7 @@ const schema = defineSchema(
     // owner's profile with the deterministic matcher (lib/matchScore).
     jobMatches: defineTable({
       userId: v.id("users"),
-      // Which board it came from (remotive | remoteok | arbeitnow).
+      // Which board it came from (remotive | remoteok | muse | jobicy | …).
       source: v.string(),
       // Stable id/slug on that board — dedupe key with userId.
       externalId: v.string(),

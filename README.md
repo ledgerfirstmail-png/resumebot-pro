@@ -128,13 +128,17 @@ status and runs one-click tests against each:
 
 # Job Radar — radius scan
 
-The radar scans 16 key-free feeds, **focused on US employers** — postings
-sourced from US-only feeds (Taco Bell, WinCo, the Workday US career sites
-including Meijer) pass as-is; worldwide boards (Remotive, RemoteOK,
-Arbeitnow, The Muse, Jobicy, We Work Remotely) keep listings with US evidence
-(a state name or abbreviation, a ZIP, a USA term) or an ambiguous label, and
-drop ones that name another country or region ("London, UK", "Berlin, DE",
-"Remote — Europe", "Toronto"). The three feed layers:
+The radar scans 15 key-free feeds and keeps **USA listings only**
+(`isUsFocusedPosting` in `src/lib/matchScore.ts` is strict): postings from
+US-only sources (Taco Bell, WinCo, the Workday US career sites including
+Meijer) pass as-is; every other row must carry US evidence in its location —
+a US state name or abbreviation, a ZIP code, or a USA term ("United States",
+"USA", "US-only"). Everything else is dropped, including unlabeled rows:
+bare "Remote" / "Anywhere in the World" / "Worldwide" labels, "Unspecified",
+"Hybrid", and foreign-sounding city names without US evidence ("London",
+"Toronto", "Paris"). Shared names survive only with US evidence ("Paris,
+TX", "Perth Amboy, NJ"). Boards whose feeds are predominantly non-US
+(Arbeitnow) are not scanned at all. The three feed layers:
 
 - **Career pages** — direct company career sites via the key-free Workday
   CXS API (Walmart, Home Depot, Lowe's, Target, Chipotle, Dollar Tree,
