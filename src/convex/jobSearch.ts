@@ -15,15 +15,17 @@ import {
   type WincoListing,
 } from "../lib/localEmployers";
 import {
+  isUsFocusedPosting,
   locationTerms,
   matchProfileToPosting,
   matchesLocation,
   isAnywhere,
-  isUsFocusedPosting,
+  relevantLocation,
   STOPWORDS,
   tokenize,
   type MatchProfile,
 } from "../lib/matchScore";
+import { parseWeWorkRemotelyRss } from "../lib/boardFeeds";
 import {
   nominatimFirstPlace,
   normalizeGeoKey,
@@ -255,7 +257,7 @@ async function fetchTheMuse(): Promise<RawPosting[]> {
           MAX_DESCRIPTION_CHARS,
         ),
         url,
-        location: locations.join(", ") || "Unspecified",
+        location: locations.join("; ") || "Unspecified",
         postedAt: parseDate(j.publication_date),
         tags: categories,
       },
@@ -397,6 +399,28 @@ async function fetchWorkdayEmployer(
       tags: [emp.name],
     };
   });
+}
+
+/**
+ * We Work Remotely — key-free RSS feed of the newest remote listings. Most
+ * rows are worldwide, but USA-only and US-state rows pass the US-focus
+ * filter, and the boards' text search narrows the feed from there.
+ */
+async function fetchWeWorkRemotely(): Promise<RawPosting[]> {
+  const { text } = await fetchText(
+    "https://weworkremotely.com/remote-jobs.rss",
+  );
+  return parseWeWorkRemotelyRss(text).slice(0, 40).map((job) => ({
+    source: "weworkremotely",
+    externalId: job.externalId,
+    title: job.title,
+    company: job.company || "Unknown company",
+    description: job.description,
+    url: job.url,
+    location: job.location,
+    postedAt: job.postedAt,
+    tags: job.tags,
+  }));
 }
 
 /**
@@ -635,6 +659,7 @@ async function gatherPostings(
     { name: "arbeitnow", run: () => fetchArbeitnow() },
     { name: "muse", run: () => fetchTheMuse() },
     { name: "jobicy", run: () => fetchJobicy() },
+    { name: "weworkremotely", run: () => fetchWeWorkRemotely() },
     ...workdayEmployers.map((emp) => ({
       name: emp.name.toLowerCase().replace(/[^a-z]/g, ""),
       run: () => fetchWorkdayEmployer(emp, wdSearchText),
@@ -698,12 +723,24 @@ async function gatherPostings(
   // measuring inside the radius — geocoding unknown posting locations within
   // a bounded budget — or naming the place for commute-sized chips. Remote
   // postings pass only via an explicit Remote chip or a named local place.
+  let result = postings;
   if (chips.some((c) => c.radiusMiles !== undefined)) {
     const radiusOut = await filterByRadius(ctx, postings, chips);
-    return { postings: radiusOut.postings, errors };
+    result = radiusOut.postings;
   }
 
-  return { postings, errors };
+  // Display only the searched location: a multi-place posting ("Columbus,
+  // OH; Dallas, TX") shows just the place the scan asked for. Postings that
+  // matched some other way (anywhere shortcut, geocoded radius) come back
+  // with their original location untouched.
+  if (locTerms.length > 0) {
+    result = result.map((p) => ({
+      ...p,
+      location: relevantLocation(p.location, locTerms),
+    }));
+  }
+
+  return { postings: result, errors };
 }
 
 type PostingItem = {

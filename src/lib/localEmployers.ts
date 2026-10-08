@@ -120,6 +120,16 @@ export const LOCAL_EMPLOYERS: LocalEmployer[] = [
       site: "dollartreeus",
     },
   },
+  {
+    name: "Meijer",
+    token: "meijer",
+    aliases: ["meijer"],
+    workday: {
+      host: "meijer.wd5.myworkdayjobs.com",
+      company: "meijer",
+      site: "Meijer",
+    },
+  },
 ];
 
 /** Employer names in registry order — the radar's "Employers" chip row. */

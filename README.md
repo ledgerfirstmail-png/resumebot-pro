@@ -128,12 +128,26 @@ status and runs one-click tests against each:
 
 # Job Radar — radius scan
 
-The radar scans 13 key-free boards, **focused on US employers** — postings
-sourced from US-only feeds (Taco Bell, WinCo, Workday US sites) pass
-as-is; worldwide boards keep listings with US evidence (a state name or
-abbreviation, a ZIP, a USA term) or an ambiguous label, and drop ones that
-name another country or region ("London, UK", "Berlin, DE", "Remote —
-Europe", "Toronto"). Location handling:
+The radar scans 16 key-free feeds, **focused on US employers** — postings
+sourced from US-only feeds (Taco Bell, WinCo, the Workday US career sites
+including Meijer) pass as-is; worldwide boards (Remotive, RemoteOK,
+Arbeitnow, The Muse, Jobicy, We Work Remotely) keep listings with US evidence
+(a state name or abbreviation, a ZIP, a USA term) or an ambiguous label, and
+drop ones that name another country or region ("London, UK", "Berlin, DE",
+"Remote — Europe", "Toronto"). The three feed layers:
+
+- **Career pages** — direct company career sites via the key-free Workday
+  CXS API (Walmart, Home Depot, Lowe's, Target, Chipotle, Dollar Tree,
+  Meijer), detail-fetched per row for the real store location.
+- **Job listings** — six key-free boards, text-searched and US-filtered.
+- **Local listings** — store-level feeds for Taco Bell (WordPress/JSON-LD),
+  WinCo (iCims), and the Workday retailers' store locations.
+
+Results show **only the relevant search location**: a multi-place posting
+("Columbus, OH; Dallas, TX", "Remote - Columbus, OH") displays just the
+place the scan asked for (`relevantLocation` in `src/lib/matchScore.ts`);
+single-place and unmatched-by-segment strings keep their original label.
+Location handling:
 
 - Plain chips ("Remote", "Ohio", "43215") use any-of text matching
   (`src/lib/matchScore.ts`): state names and abbreviations are

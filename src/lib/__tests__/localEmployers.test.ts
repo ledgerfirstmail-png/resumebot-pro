@@ -193,13 +193,14 @@ describe("registry", () => {
     }
   });
 
-  it("wires exactly the six verified Workday feeds", () => {
+  it("wires exactly the seven verified Workday feeds", () => {
     const workday = LOCAL_EMPLOYERS.filter((e) => e.workday);
     expect(workday.map((e) => e.name).sort()).toEqual([
       "Chipotle",
       "Dollar Tree",
       "Home Depot",
       "Lowe's",
+      "Meijer",
       "Target",
       "Walmart",
     ]);

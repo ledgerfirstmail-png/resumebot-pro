@@ -430,3 +430,46 @@ export function isUsFocusedPosting(
   // shared city name: "paris" alone could be Paris, TX).
   return true;
 }
+
+/** Separators boards use between several duty locations on one posting.
+ * Commas are NOT separators ("Columbus, OH" is one place); the em-dash form
+ * covers Workday detail strings like "Grandville, MI 49418 - Plant A". */
+const MULTI_LOCATION_SPLIT_RE = /\s*[;|/•·]\s*|\s+[-–—]\s+/;
+
+/** One location segment genuinely names a requested place — the same
+ * term matching as matchesLocation but WITHOUT the anywhere shortcut, so a
+ * bare "Remote" segment never beats "Columbus, OH" for a Columbus scan. */
+function segmentNamesPlace(segment: string, terms: string[]): boolean {
+  const sl = segment.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!sl) return false;
+  const tokens = sl.split(/[^a-z0-9]+/).filter(Boolean);
+  return terms.some((term) => {
+    if (USA_TERMS.has(term)) return namesUsPlace(sl, tokens);
+    return stateAliases(term).some((candidate) =>
+      candidate.length >= 3
+        ? sl.includes(candidate)
+        : tokens.includes(candidate),
+    );
+  });
+}
+
+/**
+ * The location to DISPLAY for one posting: when the stored location lists
+ * several places ("Columbus, OH; Dallas, TX", "Remote - Columbus, OH") and
+ * the scan searched for one of them, show only the place the search asked
+ * for. Single-place strings, searches with no location terms, and postings
+ * whose segments never name a requested place come back unchanged.
+ */
+export function relevantLocation(
+  postLocation: string,
+  terms: string[],
+): string {
+  const raw = postLocation.trim();
+  if (!raw || terms.length === 0) return raw;
+  const segments = raw
+    .split(MULTI_LOCATION_SPLIT_RE)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segments.length <= 1) return raw;
+  return segments.find((s) => segmentNamesPlace(s, terms)) ?? raw;
+}

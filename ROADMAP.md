@@ -621,6 +621,33 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twenty-sixth pass (2026-10-08) — wider scan: career pages, boards, local listings, relevant-location display
+
+**Requested:** "add functions to search career pages, job listings, local
+listings" and "only display the relevant job search location".
+
+- **Career pages** — `Meijer` joins the direct Workday career-site fetches
+  (tenant `meijer.wd5.myworkdayjobs.com` / site `Meijer`, probed live and
+  returning store-level rows like "Grandville, MI 49418"). Other large
+  chains were probed the same way and rejected — Kroger, Albertsons,
+  Walgreens, CVS, TJX, Hy-Vee, Starbucks, Publix, Sprouts, BJ's, Ross,
+  Michaels, Petco, PetSmart, Dollar General, Rite Aid, Dunkin, Subway,
+  Chick-fil-A, Aldi, Kohl's, FedEx, Aramark, Sysco, US Foods, Wegmans,
+  Compass, Sodexo have no reachable key-free Workday feed under the
+  guessed tenants/sites.
+- **Job listings** — We Work Remotely's key-free RSS joins the boards
+  (`src/lib/boardFeeds.ts` pure parser + `fetchWeWorkRemotely`); USA-only
+  and US-state rows survive the US-focus filter.
+- **Local listings** — the Taco Bell/WinCo store feeds plus the Workday
+  retailers' store locations now cover local hiring at 9 chains.
+- **Relevant-location display** — `relevantLocation()` in
+  `src/lib/matchScore.ts` narrows a multi-place posting ("Columbus, OH;
+  Dallas, TX", "Remote - Columbus, OH", Workday's "place - site label") to
+  the segment the search actually asked for, applied at the end of
+  `gatherPostings` (searches and watch sweeps). The Muse's multi-location
+  list is re-joined with "; " so it segments correctly. Single-place and
+  unmatched strings keep their original label.
+
 ## Resolved in the twenty-fifth pass (2026-10-07) — US-focused scan
 
 - **The radar now filters to US employers**: user request — "focus scan

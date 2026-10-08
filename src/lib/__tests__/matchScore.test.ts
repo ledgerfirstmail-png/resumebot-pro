@@ -4,6 +4,7 @@ import {
   locationTerms,
   matchProfileToPosting,
   matchesLocation,
+  relevantLocation,
   tokenize,
   US_STATE_NAMES,
   type MatchProfile,
@@ -276,5 +277,58 @@ describe("US-focus filter", () => {
     for (const source of ["tacobell", "winco", "workday"]) {
       expect(isUsFocusedPosting("London, UK", source)).toBe(true);
     }
+  });
+});
+
+describe("relevantLocation", () => {
+  it("shows only the searched place on a multi-location posting", () => {
+    expect(relevantLocation("Columbus, OH; Dallas, TX", ["columbus"])).toBe(
+      "Columbus, OH",
+    );
+    expect(relevantLocation("Columbus, OH; Dallas, TX", ["dallas"])).toBe(
+      "Dallas, TX",
+    );
+  });
+
+  it("picks the real place over a bare Remote segment", () => {
+    expect(relevantLocation("Remote - Columbus, OH", ["columbus"])).toBe(
+      "Columbus, OH",
+    );
+  });
+
+  it("picks the Remote segment when Remote is what was searched", () => {
+    expect(relevantLocation("Remote - Columbus, OH", ["remote"])).toBe(
+      "Remote",
+    );
+  });
+
+  it("strips a trailing site label after the place", () => {
+    expect(
+      relevantLocation("Grandville, MI 49418 - Manufacturing Complex", [
+        "grandville",
+      ]),
+    ).toBe("Grandville, MI 49418");
+  });
+
+  it("leaves single-place strings unchanged", () => {
+    expect(relevantLocation("Columbus, OH", ["columbus"])).toBe("Columbus, OH");
+    expect(relevantLocation("Columbus, Ohio, United States", ["ohio"])).toBe(
+      "Columbus, Ohio, United States",
+    );
+  });
+
+  it("leaves unmatched and termless postings unchanged", () => {
+    expect(relevantLocation("Columbus, OH; Dallas, TX", [])).toBe(
+      "Columbus, OH; Dallas, TX",
+    );
+    expect(
+      relevantLocation("New York, NY; Austin, TX", ["denver"]),
+    ).toBe("New York, NY; Austin, TX");
+  });
+
+  it("matches state abbreviations, not just cities", () => {
+    expect(relevantLocation("Columbus, OH; Dallas, TX", ["oh"])).toBe(
+      "Columbus, OH",
+    );
   });
 });
