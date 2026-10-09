@@ -621,6 +621,29 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twenty-eighth pass (2026-10-08) — enhanced local search results
+
+**Requested:** "enhance local search results".
+
+- **The Muse goes local** — its public API accepts a `location` param
+  (probed live: "Columbus, OH" → an ~8k-row local pool vs the 412k-row
+  worldwide index; "Flexible / Remote" rows tie to the city). The longest
+  location chip is passed server-side and two pages are fetched, so real
+  local rows survive the cross-board dedupe. Skipped during radius scans
+  (their distance filter decides locality there).
+- **Wider local fetches** — Workday list cap 5→12 rows, WinCo 6→10, so
+  sparse store-level roles stop being crowded out by the board gauntlet.
+- **Local prominence bonus** (`withLocalBonus` in `src/lib/matchScore.ts`):
+  rows from the local sources (workday/tacobell/winco/muse) that text-match
+  the searched place get **+4** ("local search" tag in matchedKeywords);
+  radius-kept neighbors that never text-match get **+2** ("nearby town");
+  capped at 100, no-op for anywhere-remote rows and non-local sources.
+  Wired into both scoring paths (searchJobs + sweepWatch).
+- Test development caught two design errors before shipping: state-term
+  matches collapsing the nearby tier ("Gahanna, OH" + an "oh" term is a
+  text match, +4 — the assertion was corrected, not the code), and the
+  nearby tier being unreachable without an explicit radius-scan signal.
+
 ## Resolved in the twenty-seventh pass (2026-10-08) — strict USA-only listings
 
 **Requested:** "remove all other countries and focus on USA, United States

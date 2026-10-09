@@ -435,3 +435,72 @@ export function relevantLocation(
   if (segments.length <= 1) return raw;
   return segments.find((s) => segmentNamesPlace(s, terms)) ?? raw;
 }
+
+/**
+ * Local-search prominence: postings pulled straight from the local scan
+ * (Workday store sites, Taco Bell, WinCo, and The Muse's local index) that
+ * actually sit in the searched place get a knee-up over equally-qualified
+ * rows from worldwide boards. +4 when the location names a searched place
+ * (city or ZIP), +2 when it only names the searched STATE — a neighboring
+ * town the scan didn't ask for but that still serves the area ("Gahanna, OH"
+ * for a "Columbus, OH" chip). Work-from-anywhere rows and non-local sources
+ * are left untouched. Two soft label tags ride along in matchedKeywords so
+ * the board can explain the uplift; capped so nothing exceeds 100.
+ */
+export const LOCAL_PLACE_BONUS = 4;
+export const LOCAL_NEARBY_BONUS = 2;
+export const LOCAL_SEARCH_LABEL = "local search";
+export const NEARBY_TOWN_LABEL = "nearby town";
+
+const LOCAL_SOURCES = new Set(["workday", "tacobell", "winco", "muse"]);
+
+export interface LocalBonusInput {
+  match: MatchResult;
+  postLocation: string;
+  source: string;
+  /** Every place term the scan searched — plain chips + radius-chip places. */
+  locationTerms: string[];
+  /** True when this scan runs a radius filter — rows that survived it
+   * without a text match measured inside the circle (nearby towns). */
+  radiusScan?: boolean;
+}
+
+/** Score with the local bonus applied (no-op for non-local sources). */
+export function withLocalBonus(input: LocalBonusInput): MatchResult {
+  const { match, postLocation, source, locationTerms, radiusScan } = input;
+  if (
+    !LOCAL_SOURCES.has(source) ||
+    locationTerms.length === 0 ||
+    match.score <= 0 ||
+    match.score >= 100 ||
+    isAnywhere(postLocation)
+  ) {
+    return match;
+  }
+  const pl = postLocation.toLowerCase().replace(/\s+/g, " ").trim();
+  const tokens = pl.split(/[^a-z0-9]+/).filter(Boolean);
+  const hit = locationTerms.some((term) =>
+    (USA_TERMS.has(term) && namesUsPlace(pl, tokens)) ||
+    stateAliases(term).some((candidate) =>
+      candidate.length >= 3
+        ? pl.includes(candidate)
+        : tokens.includes(candidate),
+    ),
+  );
+  // No text match at all: a radius scan kept it by measurement, so trust
+  // the circle — that's a nearby town serving the scanned place. Without a
+  // radius there's no such signal, and the row keeps its original score.
+  if (!hit && !radiusScan) return match;
+  const nearby = !hit;
+  return {
+    score: Math.min(
+      100,
+      match.score + (nearby ? LOCAL_NEARBY_BONUS : LOCAL_PLACE_BONUS),
+    ),
+    matchedKeywords: [
+      nearby ? NEARBY_TOWN_LABEL : LOCAL_SEARCH_LABEL,
+      ...match.matchedKeywords,
+    ],
+    missingKeywords: match.missingKeywords,
+  };
+}

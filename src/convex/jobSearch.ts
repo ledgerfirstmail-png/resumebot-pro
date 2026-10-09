@@ -21,6 +21,7 @@ import {
   matchesLocation,
   isAnywhere,
   relevantLocation,
+  withLocalBonus,
   STOPWORDS,
   tokenize,
   type MatchProfile,
@@ -221,13 +222,28 @@ async function fetchRemoteOk(): Promise<RawPosting[]> {
 /**
  * The Muse — US-heavy local hiring (on-site city/state duty locations like
  * "Dearborn, MI"), key-free. This is what makes the radar list businesses by
- * city, state, or town instead of only remote-friendly regions.
+ * city, state, or town instead of only remote-friendly regions. When the
+ * scan has a location, it is passed server-side (`location=Columbus, OH` →
+ * an 8k-row local pool instead of the 400k-row worldwide index; "Flexible /
+ * Remote" rows its index ties to the city ride along) and two pages are
+ * pulled so real local hits survive the cross-board dedupe.
  */
-async function fetchTheMuse(): Promise<RawPosting[]> {
-  const data = (await fetchJson(
-    "https://www.themuse.com/api/public/jobs?page=1",
-  )) as { results?: unknown[] };
-  return (data.results ?? []).flatMap((entry) => {
+async function fetchTheMuse(locationParam?: string): Promise<RawPosting[]> {
+  const pages = await Promise.allSettled(
+    [1, 2].map((page) =>
+      fetchJson(
+        `https://www.themuse.com/api/public/jobs?page=${page}${
+          locationParam ? `&location=${encodeURIComponent(locationParam)}` : ""
+        }`,
+      ),
+    ),
+  );
+  const results = pages.flatMap((p) =>
+    p.status === "fulfilled"
+      ? (((p.value as { results?: unknown[] })?.results ?? []) as unknown[])
+      : [],
+  );
+  return results.flatMap((entry) => {
     const j = (entry ?? {}) as Record<string, unknown>;
     const title = str(j.name);
     const url = str(
@@ -313,9 +329,12 @@ async function fetchWorkdayEmployer(
   const wd = emp.workday;
   if (!wd) return [];
   const base = `https://${wd.host}/wday/cxs/${wd.company}/${wd.site}`;
+  // 12 rows — store-level local listings are sparse in the free-text
+  // results; a wider list keeps genuine local hits from being crowded out
+  // by the cross-board dedupe and the query-share filter downstream.
   const data = (await postJson(`${base}/jobs`, {
     appliedFacets: {},
-    limit: 5,
+    limit: 12,
     offset: 0,
     searchText,
   })) as { jobPostings?: unknown[] };
@@ -426,7 +445,9 @@ async function fetchWinco(query: string): Promise<RawPosting[]> {
     keyword ? `searchKeyword=${encodeURIComponent(keyword)}&` : ""
   }in_iframe=1`;
   const { text } = await fetchText(url, cookie ? { Cookie: cookie } : {});
-  const rows = parseWincoListings(text).slice(0, 6);
+  // 10 rows — same reasoning as the Workday cap: local store roles are
+  // sparse; keep enough that the local scan surfaces them.
+  const rows = parseWincoListings(text).slice(0, 10);
   if (rows.length === 0) return [];
 
   const details = await Promise.allSettled(
@@ -620,12 +641,24 @@ async function gatherPostings(
   // — derive the terms from the parsed chips' bare places instead.
   const locTerms = chips.flatMap((c) => locationTerms(c.location));
   const wdSearchText = buildWorkdaySearchText(query, locTerms);
+  // The Muse's `location` param takes one place, so the longest chip wins
+  // ("Columbus, OH" over "Remote"); skipped when a radius scan is running —
+  // its client-side distance filter decides what's local there.
+  const museLocationParam =
+    locTerms.length > 0 && !chips.some((c) => c.radiusMiles !== undefined)
+      ? chips
+          .map((c) => c.location)
+          .reduce((a, b) => (b.length > a.length ? b : a), "")
+      : undefined;
   const workdayEmployers = LOCAL_EMPLOYERS.filter((e) => e.workday);
 
   const tasks: Array<{ name: string; run: () => Promise<RawPosting[]> }> = [
     { name: "remotive", run: () => fetchRemotive(query) },
     { name: "remoteok", run: () => fetchRemoteOk() },
-    { name: "muse", run: () => fetchTheMuse() },
+    // Server-side local index for The Muse: the longest location chip
+    // ("Columbus, OH") narrows its search to that pool; hashtags like
+    // "Flexible / Remote" still appear and are handled by the client filter.
+    { name: "muse", run: () => fetchTheMuse(museLocationParam) },
     { name: "jobicy", run: () => fetchJobicy() },
     { name: "weworkremotely", run: () => fetchWeWorkRemotely() },
     ...workdayEmployers.map((emp) => ({
@@ -773,11 +806,21 @@ export const searchJobs = action({
 
     const { postings, errors } = await gatherPostings(ctx, query, location);
 
+    const chips = location ? parseLocationChips(location) : [];
+    const locTerms = chips.flatMap((c) => locationTerms(c.location));
+    const radiusScan = chips.some((c) => c.radiusMiles !== undefined);
+
     const scored: PostingItem[] = postings
       .map((p) => {
-        const match = matchProfileToPosting(profileData.profile, {
-          title: p.title,
-          description: p.description,
+        const match = withLocalBonus({
+          match: matchProfileToPosting(profileData.profile, {
+            title: p.title,
+            description: p.description,
+          }),
+          postLocation: p.location,
+          source: p.source,
+          locationTerms: locTerms,
+          radiusScan,
         });
         return {
           source: p.source,
@@ -881,9 +924,16 @@ async function sweepWatch(
   );
   const qualified = postings
     .map((p) => {
-      const match = matchProfileToPosting(profileData.profile as MatchProfile, {
-        title: p.title,
-        description: p.description,
+      const watchChips = parseLocationChips(watch.location ?? "");
+      const match = withLocalBonus({
+        match: matchProfileToPosting(profileData.profile as MatchProfile, {
+          title: p.title,
+          description: p.description,
+        }),
+        postLocation: p.location,
+        source: p.source,
+        locationTerms: watchChips.flatMap((c) => locationTerms(c.location)),
+        radiusScan: watchChips.some((c) => c.radiusMiles !== undefined),
       });
       return { p, match };
     })

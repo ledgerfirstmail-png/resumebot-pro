@@ -5,6 +5,11 @@ import {
   matchProfileToPosting,
   matchesLocation,
   relevantLocation,
+  withLocalBonus,
+  LOCAL_PLACE_BONUS,
+  LOCAL_NEARBY_BONUS,
+  LOCAL_SEARCH_LABEL,
+  NEARBY_TOWN_LABEL,
   tokenize,
   US_STATE_NAMES,
   type MatchProfile,
@@ -279,6 +284,138 @@ describe("US-focus filter", () => {
     for (const source of ["tacobell", "winco", "workday"]) {
       expect(isUsFocusedPosting("London, UK", source)).toBe(true);
     }
+  });
+});
+
+describe("withLocalBonus", () => {
+  const base = (score: number) => ({
+    score,
+    matchedKeywords: ["cashier"],
+    missingKeywords: ["inventory"],
+  });
+
+  it("boosts a local source whose location names the searched place", () => {
+    const out = withLocalBonus({
+      match: base(70),
+      postLocation: "Columbus, OH",
+      source: "workday",
+      locationTerms: ["columbus"],
+    });
+    expect(out.score).toBe(74);
+    expect(out.matchedKeywords[0]).toBe(LOCAL_SEARCH_LABEL);
+    expect(out.matchedKeywords).toContain("cashier");
+  });
+
+  it("gives a radius-kept neighboring town the smaller bump", () => {
+    // "Gahanna, OH" carries no text overlap with the searched place — the
+    // radius measurement kept it, so the nearby label + small bump apply.
+    const out = withLocalBonus({
+      match: base(70),
+      postLocation: "Gahanna, OH",
+      source: "muse",
+      locationTerms: ["columbus"],
+      radiusScan: true,
+    });
+    expect(out.score).toBe(72);
+    expect(out.matchedKeywords[0]).toBe(NEARBY_TOWN_LABEL);
+
+    // But the same chip set text-matching the state counts as a place hit.
+    const stateMatch = withLocalBonus({
+      match: base(70),
+      postLocation: "Gahanna, OH",
+      source: "muse",
+      locationTerms: ["columbus", "oh"],
+      radiusScan: true,
+    });
+    expect(stateMatch.score).toBe(74);
+    expect(stateMatch.matchedKeywords[0]).toBe(LOCAL_SEARCH_LABEL);
+  });
+
+  it("does not bonus unmatched rows without a radius scan", () => {
+    const m = base(70);
+    expect(
+      withLocalBonus({
+        match: m,
+        postLocation: "Gahanna, OH",
+        source: "muse",
+        locationTerms: ["columbus"],
+      }),
+    ).toBe(m);
+    expect(
+      withLocalBonus({
+        match: m,
+        postLocation: "Gahanna, OH",
+        source: "muse",
+        locationTerms: ["columbus"],
+        radiusScan: false,
+      }),
+    ).toBe(m);
+  });
+
+  it("never exceeds 100", () => {
+    const out = withLocalBonus({
+      match: base(99),
+      postLocation: "Columbus, OH",
+      source: "winco",
+      locationTerms: ["columbus"],
+    });
+    expect(out.score).toBe(100);
+  });
+
+  it("leaves non-local sources and unmatched states alone", () => {
+    const m = base(70);
+    expect(
+      withLocalBonus({
+        match: m,
+        postLocation: "Dallas, TX",
+        source: "workday",
+        locationTerms: ["columbus"],
+      }),
+    ).toBe(m);
+    expect(
+      withLocalBonus({
+        match: m,
+        postLocation: "Columbus, OH",
+        source: "remotive",
+        locationTerms: ["columbus"],
+      }),
+    ).toBe(m);
+    expect(
+      withLocalBonus({
+        match: m,
+        postLocation: "Columbus, OH",
+        source: "tacobell",
+        locationTerms: [],
+      }),
+    ).toBe(m);
+  });
+
+  it("matches state-name chips against state-name locations", () => {
+    const out = withLocalBonus({
+      match: base(60),
+      postLocation: "Dearborn, MI",
+      source: "workday",
+      locationTerms: ["michigan"],
+    });
+    expect(out.score).toBe(60 + 4);
+    expect(out.matchedKeywords[0]).toBe(LOCAL_SEARCH_LABEL);
+  });
+
+  it("never boosts work-from-anywhere rows", () => {
+    const m = base(70);
+    expect(
+      withLocalBonus({
+        match: m,
+        postLocation: "Flexible / Remote",
+        source: "muse",
+        locationTerms: ["columbus"],
+      }),
+    ).toBe(m);
+  });
+
+  it("keeps the place bump above the nearby bump", () => {
+    expect(LOCAL_PLACE_BONUS).toBe(4);
+    expect(LOCAL_NEARBY_BONUS).toBe(2);
   });
 });
 

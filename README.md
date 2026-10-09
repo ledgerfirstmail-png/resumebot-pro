@@ -143,9 +143,18 @@ TX", "Perth Amboy, NJ"). Boards whose feeds are predominantly non-US
 - **Career pages** — direct company career sites via the key-free Workday
   CXS API (Walmart, Home Depot, Lowe's, Target, Chipotle, Dollar Tree,
   Meijer), detail-fetched per row for the real store location.
-- **Job listings** — six key-free boards, text-searched and US-filtered.
+- **Job listings** — five key-free boards, text-searched and US-filtered.
 - **Local listings** — store-level feeds for Taco Bell (WordPress/JSON-LD),
   WinCo (iCims), and the Workday retailers' store locations.
+
+**Local scans are enhanced at three layers**: The Muse's index is queried
+server-side with the searched place (`location=Columbus, OH` — an ~8k-row
+local pool instead of the 400k-row worldwide index, two pages deep), the
+Workday/WinCo fetch caps are widened so sparse store roles survive the
+cross-board dedupe, and rows sourced from the local feeds that sit in the
+searched place get a **+4 score bonus** (radius-kept neighboring towns +2,
+labeled "nearby town" in matched keywords) — pushing genuine local hits to
+the top of the results board.
 
 Results show **only the relevant search location**: a multi-place posting
 ("Columbus, OH; Dallas, TX", "Remote - Columbus, OH") displays just the
