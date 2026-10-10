@@ -126,7 +126,16 @@ status and runs one-click tests against each:
 - **Telegram** — `TELEGRAM_BOT_TOKEN`; "Check token" proves it via
   `getUpdates` (the same resolver the radar watch form's "Find ID" uses).
 
-# Job Radar — radius scan
+# Job Radar — results board
+
+The radar's results are grouped into **three quality tiers** — Strong match
+(≥75), Good match (≥55), and Worth a look — each sorted by score, so the board
+reads top-down by intent. Each listing renders as an information-first row
+(title, company, location, score badge) with one primary action: **Tailor to
+this job**. Auto-apply is a checkbox; interview/reject moves appear once a
+tailoring exists. The scan form collapses to a single search line plus a
+Filters popover (locations + radius, employer chips, match threshold), and
+search-alert watches live behind a **Watch** button in the results toolbar.
 
 The radar scans 15 key-free feeds and keeps **USA listings only**
 (`isUsFocusedPosting` in `src/lib/matchScore.ts` is strict): postings from

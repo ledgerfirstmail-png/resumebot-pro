@@ -3,12 +3,12 @@ import type { Doc } from "@/convex/_generated/dataModel";
 import type { TailorResult } from "@/convex/ai";
 import { ClayButton } from "@/components/clay/ClayButton";
 import { ClayCard } from "@/components/clay/ClayCard";
+import { JobResultCard } from "@/components/clay/JobResultCard";
 import { useAction, useMutation, useQuery } from "convex/react";
 import {
   Bell,
   Briefcase,
   Check,
-  ExternalLink,
   Loader2,
   Mail,
   MapPin,
@@ -16,12 +16,13 @@ import {
   RefreshCw,
   Search,
   Send,
+  SlidersHorizontal,
   Store,
   Trash2,
   Wand2,
   X,
 } from "lucide-react";
-import { useEffect, Fragment, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { parseRadiusLocation } from "@/lib/geo";
@@ -32,6 +33,7 @@ import {
   removeEmployerFromQuery,
 } from "@/lib/localEmployers";
 import { US_STATE_NAMES } from "@/lib/matchScore";
+import { groupIntoTiers, TIER_DOTS } from "@/lib/resultTiers";
 import type { ResumeProfileData } from "@/types/resume";
 
 type JobMatch = Doc<"jobMatches">;
@@ -51,36 +53,14 @@ interface JobRadarProps {
   ) => void;
 }
 
-/** Match score → chip colors so the board reads at a glance. */
-function scoreClasses(score: number): string {
-  if (score >= 70) return "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
-  if (score >= 50) return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
-  return "bg-rose-500/15 text-rose-600 dark:text-rose-400";
-}
-
-/** Quick-pick locations offered under the scan form (boards are remote-first). */
-const LOCATION_PRESETS = [
-  "Remote",
-  "Worldwide",
-  "Europe",
-  "USA",
-  "Germany",
-  "United Kingdom",
-];
+/**
+ * Quick-pick locations — US-only since pass 27 (broadcast "Remote" chips
+ * rarely survive the strict US filter; "USA" plus shared-name towns do).
+ */
+const LOCATION_PRESETS = ["USA", "Remote — US only", "Remote"];
 
 /** Radii the "within" select offers — 35mi is the local-commute default. */
 const RADIUS_OPTIONS = [10, 25, 35, 50, 100];
-/** Radius preselected when the user first opens the "within" picker. */
-const DEFAULT_RADIUS = 35;
-
-function daysAgo(ts?: number): string {
-  if (!ts) return "";
-  const days = Math.floor((Date.now() - ts) / 86_400_000);
-  if (days <= 0) return "today";
-  if (days === 1) return "1d ago";
-  if (days < 30) return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
-}
 
 export function JobRadar({
   profile,
@@ -97,7 +77,6 @@ export function JobRadar({
   const resolveTelegramChat = useAction(api.notify.resolveTelegramChat);
   const markTailored = useMutation(api.jobs.markTailored);
   const setJobStatus = useMutation(api.jobs.setJobStatus);
-  const [statusId, setStatusId] = useState<string | null>(null);
   const saveWatch = useMutation(api.jobs.saveWatch);
   const deleteWatch = useMutation(api.jobs.deleteWatch);
 
@@ -112,8 +91,8 @@ export function JobRadar({
   const [locDraft, setLocDraft] = useState("");
   // Results-side filter over the locations actually saved on this board.
   const [locFilter, setLocFilter] = useState("");
-  // View mode: score order (default) or bucketed by city/state/town.
-  const [groupByLocation, setGroupByLocation] = useState(false);
+  // "More filters" popover over the scan form (locations/employers/threshold).
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   // Auto-scan lifecycle: flipped only from promise callbacks (never
   // synchronously inside the effect) so the empty state can show "pulling
@@ -123,8 +102,9 @@ export function JobRadar({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tailoringId, setTailoringId] = useState<string | null>(null);
   const [isAutoApplying, setIsAutoApplying] = useState(false);
+  const [statusId, setStatusId] = useState<string | null>(null);
 
-  // Watch (alert) form.
+  // Watch (alert) popover — opened from the results toolbar.
   const [watchOpen, setWatchOpen] = useState(false);
   const [watchEmail, setWatchEmail] = useState(defaultEmail);
   const [watchChatId, setWatchChatId] = useState("");
@@ -171,36 +151,10 @@ export function JobRadar({
       (locFilter === "" || m.location.trim().toLowerCase() === locFilter),
   );
 
-  // "By location" view: bucket the filtered list so every city/state/town
-  // reads as a "hiring here" block, ordered by how many listings it holds.
-  type LocGroup = { key: string; label: string; items: JobMatch[] };
-  const locationGroups: LocGroup[] = [];
-  const groupFirstIds = new Map<string, LocGroup>();
-  if (groupByLocation) {
-    const byKey = new Map<string, LocGroup>();
-    for (const m of visible) {
-      const label = m.location.trim() || "Unspecified";
-      const key = label.toLowerCase();
-      const group = byKey.get(key);
-      if (group) group.items.push(m);
-      else {
-        const created: LocGroup = { key, label, items: [m] };
-        byKey.set(key, created);
-        locationGroups.push(created);
-      }
-    }
-    locationGroups.sort(
-      (a, b) =>
-        b.items.length - a.items.length || a.label.localeCompare(b.label),
-    );
-    for (const group of locationGroups) {
-      const first = group.items[0];
-      if (first) groupFirstIds.set(first._id, group);
-    }
-  }
-  const displayList = groupByLocation
-    ? locationGroups.flatMap((g) => g.items)
-    : visible;
+  // Quality tiers (pass 29): the filtered board buckets into Strong / Good /
+  // Worth-a-look bands so the default view reads top-down by intent.
+  const tiers = useMemo(() => groupIntoTiers(visible), [visible]);
+
   // Spinner/copy driver: a manual scan, or the one silent first scan.
   const searching =
     isSearching ||
@@ -231,8 +185,8 @@ export function JobRadar({
         if (out.searched === 0) {
           toast.warning(
             out.errors.length > 0
-              ? `Couldn't reach the job boards — hit “Scan boards” to retry.`
-              : "No listings came back — try “Scan boards” again.",
+              ? `Couldn't reach the job boards — hit "Scan boards" to retry.`
+              : "No listings came back — try \"Scan boards\" again.",
           );
         }
       })
@@ -439,10 +393,10 @@ export function JobRadar({
       await setJobStatus({ jobId: match._id, status });
       toast.success(
         status === "interview"
-          ? `“${match.title}” marked as interview — nice.`
+          ? `"${match.title}" marked as interview — nice.`
           : status === "rejected"
-            ? `“${match.title}” marked as rejected.`
-            : `“${match.title}” moved back to the pipeline.`,
+            ? `"${match.title}" marked as rejected.`
+            : `"${match.title}" moved back to the pipeline.`,
       );
     } catch (error) {
       toast.error(
@@ -516,199 +470,19 @@ export function JobRadar({
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Search employers */}
-      <ClayCard>
-        <div className="flex flex-col gap-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="clay-title text-xl">Find employers hiring now</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Live job boards, scored against your profile — no AI credits
-                spent on scanning.
-              </p>
-            </div>
-            <span className="clay-chip px-3 py-1 text-xs font-bold">
-              {visible.length} match{visible.length === 1 ? "" : "es"}
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <div className="clay-inset flex h-11 flex-1 items-center gap-2 rounded-2xl px-4">
-              <Search className="size-4 shrink-0 text-muted-foreground" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="Role or skills — e.g. “react developer”"
-                className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
-                aria-label="Search job titles or skills"
-              />
-            </div>
-            <div className="clay-inset flex min-h-11 flex-1 flex-wrap items-center gap-1.5 rounded-2xl px-3">
-              <MapPin className="size-4 shrink-0 text-muted-foreground" />
-              {locations.map((loc) => (
-                <span
-                  key={loc}
-                  className="clay-chip flex items-center gap-1 py-0.5 pl-2.5 pr-1.5 text-xs font-bold"
-                >
-                  {loc}
-                  <button
-                    type="button"
-                    onClick={() => removeLocation(loc)}
-                    aria-label={`Remove ${loc} location`}
-                    className="rounded-full text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </span>
-              ))}
-              {radiusChips.map((chip) => (
-                <span
-                  key={`r-${chip.place.toLowerCase()}`}
-                  className="flex items-center gap-1 rounded-full bg-primary/15 py-0.5 pl-2.5 pr-1.5 text-xs font-bold text-primary ring-1 ring-primary/40"
-                >
-                  <Radar className="size-3" />
-                  {chip.place} · within {chip.miles} mi
-                  <button
-                    type="button"
-                    onClick={() => removeRadiusChip(chip.place)}
-                    aria-label={`Remove ${chip.place} radius`}
-                    className="rounded-full text-primary/70 hover:text-primary"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </span>
-              ))}
-              <input
-                value={locDraft}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (/[,;|]/.test(value)) {
-                    const parts = value.split(/[,;|]+/);
-                    const rest = parts.pop() ?? "";
-                    for (const part of parts) addLocation(part);
-                    setLocDraft(rest);
-                  } else {
-                    setLocDraft(value);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (locDraft.trim().length > 0) addLocation(locDraft);
-                    else handleSearch();
-                  } else if (e.key === "Backspace" && locDraft === "") {
-                    setLocations((prev) => prev.slice(0, -1));
-                  }
-                }}
-                onBlur={() => {
-                  if (locDraft.trim().length > 0) addLocation(locDraft);
-                }}
-                placeholder={
-                  locations.length + radiusChips.length === 0
-                    ? "City, state or ZIP (optional) — pick “within” for a radius scan"
-                    : "Add city, state or ZIP"
-                }
-                className="min-w-16 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
-                aria-label="Add a city, state, or town — comma or Enter adds it"
-              />
-            </div>
-            <select
-              value=""
-              onChange={(e) => {
-                if (e.target.value) handleRadiusPick(Number(e.target.value));
-              }}
-              aria-label="Scan within a radius of the typed place"
-              className="clay-inset h-11 cursor-pointer rounded-2xl px-2 text-sm font-semibold outline-none"
-              title="Distance-filter the scan to a radius around the typed place (35 mi = local)"
-            >
-              <option value="">within…</option>
-              {RADIUS_OPTIONS.map((miles) => (
-                <option key={miles} value={miles}>
-                  within {miles} mi
-                </option>
-              ))}
-            </select>
-            <ClayButton
-              size="lg"
-              onClick={handleSearch}
-              disabled={searching}
-            >
-              {searching ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <Radar />
-              )}
-              {searching ? "Scanning…" : "Scan boards"}
-            </ClayButton>
-            <ClayButton
-              size="lg"
-              variant="soft"
-              onClick={handleSearch}
-              disabled={searching}
-              title="Re-scan the boards with the same search and refresh every score"
-              aria-label="Refresh listings"
-            >
-              {searching ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <RefreshCw />
-              )}
-              Refresh
-            </ClayButton>
-          </div>
-
-          {/* Location quick-picks */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              <MapPin className="size-3.5" /> Locations
-            </span>
-            {suggestions.map((s) => {
-              const active = locations.some(
-                (l) => l.toLowerCase() === s.toLowerCase(),
-              );
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => toggleLocation(s)}
-                  aria-pressed={active}
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 transition-colors ${
-                    active
-                      ? "bg-primary/15 text-primary ring-primary/40"
-                      : "text-muted-foreground ring-border/60 hover:bg-card hover:text-foreground"
-                  }`}
-                >
-                  {s}
-                </button>
-              );
-            })}
-            <select
-              value=""
-              onChange={(e) => {
-                if (e.target.value) addLocation(e.target.value);
-              }}
-              aria-label="Add a US state to the scan"
-              className="cursor-pointer rounded-full bg-card px-2 py-1 text-xs font-semibold text-muted-foreground ring-1 ring-border/60 hover:text-foreground"
-            >
-              <option value="">+ State…</option>
-              {US_STATE_NAMES.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            {radiusChips.length === 0 && (
-              <button
-                type="button"
-                onClick={() => handleRadiusPick(DEFAULT_RADIUS)}
-                title="Distance-filter the scan to 35 miles around the last place you typed"
-                className="rounded-full bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground ring-1 ring-border/60 transition-colors hover:bg-card hover:text-foreground"
-              >
-                <Radar className="mr-1 inline size-3" />
-                within 35 mi (local)
-              </button>
-            )}
+      {/* Scan form — one search line + a filters popover (pass 29). */}
+      <ClayCard className="p-4 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="clay-inset flex h-11 flex-1 items-center gap-2 rounded-2xl px-4">
+            <Search className="size-4 shrink-0 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              placeholder="Role or skills — e.g. 'react developer'"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
+              aria-label="Search job titles or skills"
+            />
             {locations.length + radiusChips.length > 0 && (
               <button
                 type="button"
@@ -717,72 +491,228 @@ export function JobRadar({
                   setRadiusChips([]);
                   setLocFilter("");
                 }}
-                className="px-1 text-xs font-semibold text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary"
+                title="Clear all location chips"
               >
-                Clear
+                <MapPin className="size-3" />
+                {locations.length + radiusChips.length}
+                <X className="size-3 opacity-70" />
               </button>
             )}
           </div>
 
-          {radiusChips.length > 0 &&
-            !locations.some((l) => l.toLowerCase().includes("remote")) && (
-              <p className="text-xs text-muted-foreground">
-                Local scan keeps jobs inside the radius — add a Remote chip to
-                include work-from-anywhere roles.
-              </p>
+          {/* More filters — locations, employers, threshold. */}
+          <div className="relative shrink-0">
+            <ClayButton
+              variant="soft"
+              onClick={() => setFiltersOpen((o) => !o)}
+              aria-expanded={filtersOpen}
+            >
+              <SlidersHorizontal />
+              <span className="hidden sm:inline">Filters</span>
+            </ClayButton>
+            {filtersOpen && (
+              <div className="absolute right-0 top-12 z-40 flex w-[26rem] max-w-[calc(100vw-2rem)] flex-col gap-3 rounded-2xl border border-border/60 bg-card p-4 shadow-xl">
+                {/* Locations */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="mr-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    <MapPin className="size-3.5" /> Locations
+                  </span>
+                  {suggestions.map((s) => {
+                    const active = locations.some(
+                      (l) => l.toLowerCase() === s.toLowerCase(),
+                    );
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => toggleLocation(s)}
+                        aria-pressed={active}
+                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 transition-colors ${
+                          active
+                            ? "bg-primary/15 text-primary ring-primary/40"
+                            : "text-muted-foreground ring-border/60 hover:bg-accent hover:text-foreground"
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Chips + draft + radius picker (the location chip editor) */}
+                <div className="clay-inset flex min-h-11 flex-wrap items-center gap-1.5 rounded-2xl px-3">
+                  {locations.map((loc) => (
+                    <span
+                      key={loc}
+                      className="clay-chip flex items-center gap-1 py-0.5 pl-2.5 pr-1.5 text-xs font-bold"
+                    >
+                      {loc}
+                      <button
+                        type="button"
+                        onClick={() => removeLocation(loc)}
+                        aria-label={`Remove ${loc} location`}
+                        className="rounded-full text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {radiusChips.map((chip) => (
+                    <span
+                      key={`r-${chip.place.toLowerCase()}`}
+                      className="flex items-center gap-1 rounded-full bg-primary/15 py-0.5 pl-2.5 pr-1.5 text-xs font-bold text-primary ring-1 ring-primary/40"
+                    >
+                      <Radar className="size-3" />
+                      {chip.place} · within {chip.miles} mi
+                      <button
+                        type="button"
+                        onClick={() => removeRadiusChip(chip.place)}
+                        aria-label={`Remove ${chip.place} radius`}
+                        className="rounded-full text-primary/70 hover:text-primary"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    value={locDraft}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (/[,;|]/.test(value)) {
+                        const parts = value.split(/[,;|]+/);
+                        const rest = parts.pop() ?? "";
+                        for (const part of parts) addLocation(part);
+                        setLocDraft(rest);
+                      } else {
+                        setLocDraft(value);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (locDraft.trim().length > 0) addLocation(locDraft);
+                      } else if (e.key === "Backspace" && locDraft === "") {
+                        setLocations((prev) => prev.slice(0, -1));
+                      }
+                    }}
+                    onBlur={() => {
+                      if (locDraft.trim().length > 0) addLocation(locDraft);
+                    }}
+                    placeholder={
+                      locations.length + radiusChips.length === 0
+                        ? "City, state or ZIP — comma or Enter adds it"
+                        : "Add city, state or ZIP"
+                    }
+                    className="min-w-16 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
+                    aria-label="Add a city, state, or town — comma or Enter adds it"
+                  />
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) handleRadiusPick(Number(e.target.value));
+                    }}
+                    aria-label="Scan within a radius of the typed place"
+                    className="cursor-pointer rounded-full bg-card px-2 py-1 text-xs font-semibold text-muted-foreground ring-1 ring-border/60 hover:text-foreground"
+                    title="Distance-filter the scan to a radius around the typed place (35 mi = local)"
+                  >
+                    <option value="">within…</option>
+                    {RADIUS_OPTIONS.map((miles) => (
+                      <option key={miles} value={miles}>
+                        within {miles} mi
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) addLocation(e.target.value);
+                    }}
+                    aria-label="Add a US state to the scan"
+                    className="cursor-pointer rounded-full bg-card px-2 py-1 text-xs font-semibold text-muted-foreground ring-1 ring-border/60 hover:text-foreground"
+                  >
+                    <option value="">+ State…</option>
+                    {US_STATE_NAMES.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {radiusChips.length > 0 &&
+                  !locations.some((l) => l.toLowerCase().includes("remote")) && (
+                    <p className="text-xs text-muted-foreground">
+                      Local scan keeps jobs inside the radius — add a Remote chip to
+                      include work-from-anywhere roles.
+                    </p>
+                  )}
+
+                {/* Local employers (retail & food) quick-picks */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="mr-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    <Store className="size-3.5" /> Employers
+                  </span>
+                  {EMPLOYER_CHIP_NAMES.map((name) => {
+                    const active = isEmployerSelected(query, name);
+                    return (
+                      <button
+                        key={name}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() =>
+                          setQuery((prev) =>
+                            active
+                              ? removeEmployerFromQuery(prev, name)
+                              : addEmployerToQuery(prev, name),
+                          )
+                        }
+                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 transition-colors ${
+                          active
+                            ? "bg-primary/15 text-primary ring-primary/40"
+                            : "text-muted-foreground ring-border/60 hover:bg-accent hover:text-foreground"
+                        }`}
+                      >
+                        {name}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Match threshold */}
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Show ≥ {minScore}% match
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={90}
+                    step={5}
+                    value={minScore}
+                    onChange={(e) => setMinScore(Number(e.target.value))}
+                    className="h-2 flex-1 cursor-pointer accent-primary"
+                    aria-label="Minimum match score"
+                  />
+                </div>
+              </div>
             )}
-
-          {/* Local employers (retail & food) quick-picks */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              <Store className="size-3.5" /> Employers
-            </span>
-            {EMPLOYER_CHIP_NAMES.map((name) => {
-              const active = isEmployerSelected(query, name);
-              return (
-                <button
-                  key={name}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() =>
-                    setQuery((prev) =>
-                      active
-                        ? removeEmployerFromQuery(prev, name)
-                        : addEmployerToQuery(prev, name),
-                    )
-                  }
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 transition-colors ${
-                    active
-                      ? "bg-primary/15 text-primary ring-primary/40"
-                      : "text-muted-foreground ring-border/60 hover:bg-card hover:text-foreground"
-                  }`}
-                >
-                  {name}
-                </button>
-              );
-            })}
-            <span className="text-[11px] text-muted-foreground/80">
-              Brand chips scan their careers feeds — pair with a city for
-              local hiring.
-            </span>
           </div>
 
-          {/* Match threshold */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Show ≥ {minScore}% match
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={90}
-              step={5}
-              value={minScore}
-              onChange={(e) => setMinScore(Number(e.target.value))}
-              className="h-2 flex-1 cursor-pointer accent-primary"
-              aria-label="Minimum match score"
-            />
-          </div>
+          <ClayButton size="lg" onClick={handleSearch} disabled={searching}>
+            {searching ? <Loader2 className="animate-spin" /> : <Radar />}
+            {searching ? "Scanning…" : "Scan boards"}
+          </ClayButton>
+          <ClayButton
+            size="lg"
+            variant="soft"
+            onClick={handleSearch}
+            disabled={searching}
+            title="Re-scan the boards with the same search and refresh every score"
+            aria-label="Refresh listings"
+          >
+            {searching ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+            <span className="hidden sm:inline">Refresh</span>
+          </ClayButton>
         </div>
       </ClayCard>
 
@@ -810,12 +740,13 @@ export function JobRadar({
               : matches.length === 0
                 ? "Nothing scanned yet — run your first search above to pull live openings."
                 : locFilter
-                  ? "No saved listings in that location — switch back to “All locations” or scan again."
+                  ? "No saved listings in that location — switch back to 'All locations' or scan again."
                   : `No listings at or above ${minScore}% right now — lower the bar or scan again.`}
           </p>
         </ClayCard>
       ) : (
         <>
+          {/* Results toolbar */}
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <h2 className="clay-title text-lg">Job listings</h2>
             <div className="flex items-center gap-2">
@@ -834,213 +765,208 @@ export function JobRadar({
                   ))}
                 </select>
               )}
-              <div className="flex items-center gap-0.5 rounded-full bg-card/70 p-0.5 ring-1 ring-border/60">
-                <button
-                  type="button"
-                  onClick={() => setGroupByLocation(false)}
-                  aria-pressed={!groupByLocation}
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                    groupByLocation
-                      ? "text-muted-foreground hover:text-foreground"
-                      : "bg-primary/15 text-primary"
-                  }`}
-                >
-                  By match
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGroupByLocation(true)}
-                  aria-pressed={groupByLocation}
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                    groupByLocation
-                      ? "bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  By location
-                </button>
-              </div>
               <span className="text-xs font-semibold text-muted-foreground">
-                {visible.length} of {matches.length} saved ·{" "}
-                {groupByLocation ? "grouped by city/state" : "sorted by match"}
+                {visible.length} of {matches.length} saved
               </span>
+              <button
+                type="button"
+                onClick={() => setWatchOpen((o) => !o)}
+                aria-expanded={watchOpen}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground ring-1 ring-border/60 transition-colors hover:text-foreground"
+                title="Alert me when new matches clear the bar"
+              >
+                <Bell className="size-3.5" />
+                Watch
+                {watches && watches.length > 0 && (
+                  <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-black text-primary">
+                    {watches.length}
+                  </span>
+                )}
+              </button>
               <Link
                 to="/tracker"
-                className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-card px-2.5 py-1 text-xs font-bold text-muted-foreground ring-1 ring-border/60 transition-colors hover:text-foreground"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground ring-1 ring-border/60 transition-colors hover:text-foreground"
                 title="Follow your applications from applied to interview"
               >
-                <Briefcase className="size-3" />
+                <Briefcase className="size-3.5" />
                 Tracker
               </Link>
             </div>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-          {displayList.map((match) => {
-            const isSelected = selected.has(match._id);
-            const groupHead = groupFirstIds.get(match._id);
-            return (
-              <Fragment key={match._id}>
-                {groupHead && (
-                  <div className="col-span-2 flex items-center gap-2 pt-2">
-                    <span className="clay-chip flex max-w-72 items-center gap-1.5 truncate px-3 py-1 text-xs font-bold">
-                      <MapPin className="size-3 shrink-0" />
-                      {groupHead.label}
-                    </span>
-                    <span className="text-xs font-semibold text-muted-foreground">
-                      {groupHead.items.length} hiring
-                    </span>
-                  </div>
-                )}
-              <ClayCard
-                className={`flex flex-col gap-3 ${isSelected ? "ring-2 ring-primary/50" : ""}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-base font-bold">{match.title}</h3>
-                    <p className="truncate text-sm text-muted-foreground">
-                      {match.company} · {match.location}
-                    </p>
-                  </div>
-                  <span
-                    className={`clay-chip shrink-0 px-2.5 py-1 text-sm font-black ${scoreClasses(match.score)}`}
-                    title={`Board match score ${match.score}%`}
+
+          {/* Watch popover (alerts over this search) */}
+          {watchOpen && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/80 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Watching "{query.trim() || "all live openings"}"
+                {locations.length + radiusChips.length > 0
+                  ? ` in ${[
+                      ...locations,
+                      ...radiusChips.map((c) => `${c.place} ≤${c.miles}mi`),
+                    ].join(", ")}`
+                  : ""}
+              </p>
+
+              <div className="flex flex-wrap gap-6">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={watchEmailOn}
+                    onChange={(e) => setWatchEmailOn(e.target.checked)}
+                    className="size-4 accent-primary"
+                  />
+                  <Mail className="size-4 text-muted-foreground" /> Email
+                  <input
+                    value={watchEmail}
+                    onChange={(e) => setWatchEmail(e.target.value)}
+                    type="email"
+                    placeholder="you@example.com"
+                    className="clay-inset h-9 flex-1 rounded-xl px-3 text-sm outline-none"
+                    aria-label="Alert email address"
+                  />
+                </label>
+
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={watchTelegramOn}
+                    onChange={(e) => setWatchTelegramOn(e.target.checked)}
+                    className="size-4 accent-primary"
+                  />
+                  <Send className="size-4 text-muted-foreground" /> Telegram
+                  <input
+                    value={watchChatId}
+                    onChange={(e) => setWatchChatId(e.target.value)}
+                    placeholder="chat ID"
+                    className="clay-inset h-9 w-36 rounded-xl px-3 text-sm outline-none"
+                    aria-label="Telegram chat ID"
+                  />
+                  <ClayButton
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResolveChat}
+                    disabled={isResolvingChat}
                   >
-                    {match.score}%
+                    {isResolvingChat ? <Loader2 className="animate-spin" /> : null}
+                    Find ID
+                  </ClayButton>
+                </label>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Telegram: message your bot once, then hit "Find ID". The bot token
+                lives in the project's Keys tab as TELEGRAM_BOT_TOKEN; email needs
+                RESEND_API_KEY. Without them the sweep still runs and records why
+                nothing was sent.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <ClayButton
+                  onClick={handleSaveWatch}
+                  disabled={isSavingWatch || query.trim().length < 2}
+                >
+                  {isSavingWatch ? <Loader2 className="animate-spin" /> : <Bell />}
+                  Save watch
+                </ClayButton>
+                {watches !== undefined && watches.length > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {watches.length} active watch{watches.length === 1 ? "" : "es"}
+                    {" — "}
+                    {watches[0].lastStatus ?? "hourly sweep on"}
+                  </span>
+                )}
+              </div>
+
+              {/* Existing watches */}
+              {watches !== undefined && watches.length > 0 && (
+                <ul className="flex flex-col gap-2 border-t border-border/60 pt-2">
+                  {watches.map((watch) => (
+                    <li
+                      key={watch._id}
+                      className="flex flex-wrap items-center gap-2 text-sm"
+                    >
+                      <span className="font-semibold">"{watch.query}"</span>
+                      {watch.location && (
+                        <span className="clay-chip flex items-center gap-1 px-2 py-0.5 text-xs font-bold">
+                          <MapPin className="size-3" />
+                          {watch.location}
+                        </span>
+                      )}
+                      <span className="clay-chip px-2 py-0.5 text-xs font-bold">
+                        ≥ {watch.minScore}%
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {[
+                          watch.emailEnabled && watch.email
+                            ? `email ${watch.email}`
+                            : null,
+                          watch.telegramEnabled && watch.telegramChatId
+                            ? `telegram …${watch.telegramChatId.slice(-4)}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "no alerts on"}
+                        {watch.lastStatus ? ` · last: ${watch.lastStatus}` : ""}
+                      </span>
+                      <span className="ml-auto flex items-center gap-1">
+                        <ClayButton
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRunWatch(watch)}
+                          title="Run this sweep now"
+                        >
+                          Run now
+                        </ClayButton>
+                        <ClayButton
+                          variant="ghost"
+                          size="sm"
+                          onClick={async () => {
+                            await deleteWatch({ watchId: watch._id });
+                            toast.success("Watch deleted.");
+                          }}
+                          aria-label="Delete watch"
+                        >
+                          <Trash2 />
+                        </ClayButton>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Tier-grouped results (pass 29). */}
+          <div className="flex flex-col gap-6">
+            {tiers.map((tier) => (
+              <section key={tier.level} aria-label={tier.label}>
+                <div className="mb-2 flex items-center gap-2 px-1">
+                  <span className={`size-2 rounded-full ${TIER_DOTS[tier.level]}`} />
+                  <h3 className="text-sm font-bold">{tier.label}</h3>
+                  <span className="text-xs text-muted-foreground">
+                    {tier.items.length}
                   </span>
                 </div>
-
-                <p className="text-xs text-muted-foreground">
-                  {match.source} {match.postedAt ? `· ${daysAgo(match.postedAt)}` : ""}
-                  {match.status === "applied" && match.tailoredScore != null
-                    ? ` · applied with ${match.tailoredScore}% resume`
-                    : match.status === "tailored" && match.tailoredScore != null
-                      ? ` · tailored to ${match.tailoredScore}%`
-                      : ""}
-                  {match.status === "interview" ? " · interviewing" : ""}
-                  {match.status === "rejected" ? " · rejected" : ""}
-                </p>
-
-                {match.matchedKeywords.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {match.matchedKeywords.slice(0, 6).map((kw) => (
-                      <span
-                        key={kw}
-                        className="rounded-full bg-emerald-500/12 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400"
-                      >
-                        {kw}
-                      </span>
-                    ))}
-                    {match.missingKeywords.slice(0, 3).map((kw) => (
-                      <span
-                        key={kw}
-                        className="rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400"
-                        title="Posting term your resume doesn't cover yet"
-                      >
-                        +{kw}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
-                  <ClayButton
-                    size="sm"
-                    onClick={() => handleTailor(match)}
-                    disabled={
-                      tailoringId !== null ||
-                      match.status === "applied" ||
-                      match.status === "interview" ||
-                      match.status === "rejected"
-                    }
-                    title="Rewrite your resume for this posting and score it"
-                  >
-                    {tailoringId === match._id ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      <Wand2 />
-                    )}
-                    {match.status === "tailored"
-                      ? "Re-tailor"
-                      : match.status === "applied"
-                        ? "Applied"
-                        : "Tailor to this job"}
-                  </ClayButton>
-
-                  <label className="flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleSelected(match._id)}
-                      disabled={
-                        match.status === "applied" ||
-                        match.status === "interview" ||
-                        match.status === "rejected"
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {tier.items.map((match) => (
+                    <JobResultCard
+                      key={match._id}
+                      match={match}
+                      selected={selected.has(match._id)}
+                      tailoring={tailoringId === match._id}
+                      statusBusy={statusId === match._id}
+                      onTailor={() => handleTailor(match)}
+                      onToggleAutoApply={() => toggleSelected(match._id)}
+                      canShowPipeline={
+                        match.status === "tailored" || match.status === "applied"
                       }
-                      className="size-4 accent-primary"
-                      aria-label={`Select ${match.title} for auto-apply`}
+                      onInterview={() => handleStatus(match, "interview")}
+                      onReject={() => handleStatus(match, "rejected")}
                     />
-                    Auto-apply
-                  </label>
-
-                  {(match.status === "tailored" ||
-                    match.status === "applied") && (
-                    <>
-                      <ClayButton
-                        size="sm"
-                        variant="soft"
-                        onClick={() => handleStatus(match, "interview")}
-                        disabled={statusId === match._id}
-                        title="Mark as interviewing"
-                      >
-                        Interview
-                      </ClayButton>
-                      <ClayButton
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleStatus(match, "rejected")}
-                        disabled={statusId === match._id}
-                        title="Mark as rejected"
-                      >
-                        Reject
-                      </ClayButton>
-                    </>
-                  )}
-                  {match.status === "interview" && (
-                    <ClayButton
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleStatus(match, "rejected")}
-                      disabled={statusId === match._id}
-                      title="Mark as rejected"
-                    >
-                      Reject
-                    </ClayButton>
-                  )}
-                  {match.status === "rejected" && (
-                    <ClayButton
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleStatus(match, "new")}
-                      disabled={statusId === match._id}
-                      title="Move back into the pipeline"
-                    >
-                      Restore
-                    </ClayButton>
-                  )}
-
-                  <a
-                    href={match.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
-                  >
-                    Open posting <ExternalLink className="size-3.5" />
-                  </a>
+                  ))}
                 </div>
-              </ClayCard>
-              </Fragment>
-            );
-          })}
+              </section>
+            ))}
           </div>
         </>
       )}
@@ -1077,165 +1003,6 @@ export function JobRadar({
           </div>
         </div>
       )}
-
-      {/* Watches — email watch + Telegram alerts */}
-      <ClayCard>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="clay-title text-xl">Watch this search</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              An hourly sweep emails you and pings Telegram when new matches
-              clear {minScore}%.
-            </p>
-          </div>
-          <ClayButton onClick={() => setWatchOpen((o) => !o)}>
-            <Bell />
-            {watchOpen ? "Close" : watches && watches.length > 0 ? "Add watch" : "Set up alerts"}
-          </ClayButton>
-        </div>
-
-        {watchOpen && (
-          <div className="mt-4 flex flex-col gap-3 rounded-2xl bg-card/70 p-4 ring-1 ring-border/60">
-            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Watching “{query.trim() || "all live openings”"}
-              {locations.length + radiusChips.length > 0
-                ? ` in ${[
-                    ...locations,
-                    ...radiusChips.map((c) => `${c.place} ≤${c.miles}mi`),
-                  ].join(", ")}`
-                : ""}
-            </p>
-
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={watchEmailOn}
-                onChange={(e) => setWatchEmailOn(e.target.checked)}
-                className="size-4 accent-primary"
-              />
-              <Mail className="size-4 text-muted-foreground" /> Email digest to
-              <input
-                value={watchEmail}
-                onChange={(e) => setWatchEmail(e.target.value)}
-                type="email"
-                placeholder="you@example.com"
-                className="clay-inset h-9 flex-1 rounded-xl px-3 text-sm outline-none"
-                aria-label="Alert email address"
-              />
-            </label>
-
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={watchTelegramOn}
-                onChange={(e) => setWatchTelegramOn(e.target.checked)}
-                className="size-4 accent-primary"
-              />
-              <Send className="size-4 text-muted-foreground" /> Telegram bot
-              message
-              <input
-                value={watchChatId}
-                onChange={(e) => setWatchChatId(e.target.value)}
-                placeholder="chat ID"
-                className="clay-inset h-9 w-36 rounded-xl px-3 text-sm outline-none"
-                aria-label="Telegram chat ID"
-              />
-              <ClayButton
-                variant="ghost"
-                size="sm"
-                onClick={handleResolveChat}
-                disabled={isResolvingChat}
-              >
-                {isResolvingChat ? <Loader2 className="animate-spin" /> : null}
-                Find ID
-              </ClayButton>
-            </label>
-
-            <p className="text-xs text-muted-foreground">
-              Telegram: message your bot once, then hit “Find ID”. The bot token
-              lives in the project’s Keys tab as TELEGRAM_BOT_TOKEN; email needs
-              RESEND_API_KEY. Without them the sweep still runs and records why
-              nothing was sent.
-            </p>
-
-            <div className="flex gap-2">
-              <ClayButton
-                onClick={handleSaveWatch}
-                disabled={isSavingWatch || query.trim().length < 2}
-              >
-                {isSavingWatch ? <Loader2 className="animate-spin" /> : <Bell />}
-                Save watch
-              </ClayButton>
-            </div>
-          </div>
-        )}
-
-        {watches === undefined ? (
-          <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Loading watches…
-          </div>
-        ) : watches.length > 0 ? (
-          <ul className="mt-4 flex flex-col gap-2">
-            {watches.map((watch) => (
-              <li
-                key={watch._id}
-                className="flex flex-wrap items-center gap-3 rounded-2xl bg-card/70 px-4 py-3 text-sm ring-1 ring-border/60"
-              >
-                <span className="font-semibold">“{watch.query}”</span>
-                {watch.location && (
-                  <span className="clay-chip flex items-center gap-1 px-2 py-0.5 text-xs font-bold">
-                    <MapPin className="size-3" />
-                    {watch.location}
-                  </span>
-                )}
-                <span className="clay-chip px-2 py-0.5 text-xs font-bold">
-                  ≥ {watch.minScore}%
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {[
-                    watch.emailEnabled && watch.email ? `email ${watch.email}` : null,
-                    watch.telegramEnabled && watch.telegramChatId
-                      ? `telegram …${watch.telegramChatId.slice(-4)}`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ") || "no alerts on"}
-                </span>
-                {watch.lastStatus && (
-                  <span className="truncate text-xs text-muted-foreground">
-                    last: {watch.lastStatus}
-                  </span>
-                )}
-                <span className="ml-auto flex items-center gap-1">
-                  <ClayButton
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRunWatch(watch)}
-                    title="Run this sweep now"
-                  >
-                    Run now
-                  </ClayButton>
-                  <ClayButton
-                    variant="ghost"
-                    size="sm"
-                    onClick={async () => {
-                      await deleteWatch({ watchId: watch._id });
-                      toast.success("Watch deleted.");
-                    }}
-                    aria-label="Delete watch"
-                  >
-                    <Trash2 />
-                  </ClayButton>
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-4 text-sm text-muted-foreground">
-            No watches yet — search for a role, then turn on alerts above.
-          </p>
-        )}
-      </ClayCard>
     </div>
   );
 }

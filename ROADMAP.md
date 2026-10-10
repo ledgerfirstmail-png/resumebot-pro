@@ -621,6 +621,33 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the twenty-ninth pass (2026-10-10) — results board redesign & UI simplification
+
+**Requested:** "enhance this app by 10 times: 1) Search results needs a major
+upgrade. 2) Simplify the UI. It looks too full. Make it more
+information-ready."
+
+- **Tiered results board** — new pure `src/lib/resultTiers.ts`:
+  `groupIntoTiers` buckets the filtered board into **Strong match (≥75)** /
+  **Good match (≥55)** / **Worth a look**, sorted by score inside each band
+  (10 vitest cases). The flat score-sorted grid becomes a top-down read by
+  intent, with tier headers + counts + colored dots.
+- **Information-first result card** — new `JobResultCard` component:
+  title + company + location and the shared score badge lead; the fit story
+  compresses into one quiet line (percent placed, matched count, one missing
+  skill to gain); one primary action (Tailor), auto-apply as a checkbox, and
+  pipeline moves only once a tailoring exists. `scoreClasses` moves to the
+  shared `src/lib/scoreBadge.ts` (radar + tracker single source).
+- **Collapsed scan form** — the radar's form is one search line (with a
+  location-chip count badge that clears all chips) + a **Filters** popover
+  holding the location chips/draft/radius picker, the employer brand chips,
+  and the match-threshold slider. Twelve controls collapse into one row at
+  rest; everything remains one click away.
+- **Watch card folded away** — the full-width "Watch this search" card is
+  gone; a slim **Watch** button in the results toolbar (with an active-watch
+  count badge) opens a compact popover with the same email/Telegram form and
+  the existing watch list ("Run now" / delete preserved).
+
 ## Resolved in the twenty-eighth pass (2026-10-08) — enhanced local search results
 
 **Requested:** "enhance local search results".
