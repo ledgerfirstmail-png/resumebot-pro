@@ -621,6 +621,20 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the thirtieth pass (2026-10-10) — consistency pass on the redesign
+
+**Requested:** "proceed with updates".
+
+- **Tracker rows match the new board** — `TrackerBoard` now uses the shared
+  `scoreClasses` from `src/lib/scoreBadge.ts` (its local copy removed; the
+  80/60 thresholds are now single-sourced), compact card padding (`gap-2`,
+  `p-4 sm:p-5`) and 15px titles to match `JobResultCard`, and the status pill
+  moved to the actions line (right-aligned) so each row reads as one tight
+  card instead of three stacked sections.
+- **Radar copy aligned everywhere** — the dashboard's radar subtitle and the
+  landing page's radar feature card now describe the tiered board (strong /
+  good / worth-a-look bands) instead of a flat scored list.
+
 ## Resolved in the twenty-ninth pass (2026-10-10) — results board redesign & UI simplification
 
 **Requested:** "enhance this app by 10 times: 1) Search results needs a major

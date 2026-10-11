@@ -130,7 +130,8 @@ status and runs one-click tests against each:
 
 The radar's results are grouped into **three quality tiers** — Strong match
 (≥75), Good match (≥55), and Worth a look — each sorted by score, so the board
-reads top-down by intent. Each listing renders as an information-first row
+reads top-down by intent. The applications tracker rows use the same compact
+card style and shared score badge thresholds for a consistent workspace. Each listing renders as an information-first row
 (title, company, location, score badge) with one primary action: **Tailor to
 this job**. Auto-apply is a checkbox; interview/reject moves appear once a
 tailoring exists. The scan form collapses to a single search line plus a

@@ -83,7 +83,7 @@ const FEATURES = [
     color: "bg-clay-lilac",
     text: "text-purple-800",
     title: "Job radar finds the employers",
-    body: "Scan live job boards in one click — every opening scored against your resume, so you know where you're strong before you apply.",
+    body: "Scan live job boards in one click — openings arrive tiered as strong, good, and worth-a-look against your resume, so you know where you're strong before you apply.",
   },
   {
     icon: Bell,

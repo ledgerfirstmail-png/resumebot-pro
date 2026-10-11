@@ -420,7 +420,7 @@ export default function Dashboard() {
               </h1>
               <p className="mt-1.5 text-sm text-muted-foreground">
                 {tab === "radar"
-                  ? "Live openings scored against your resume — tailor, auto-apply, and watch for new matches."
+                  ? "Live openings tiered against your resume — tailor the strong ones, auto-apply, and watch for new matches."
                   : "Tailor your resume to any job posting and score what businesses are looking for."}
               </p>
               {usage && usage.usedToday > 0 && (

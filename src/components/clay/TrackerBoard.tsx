@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { scoreClasses } from "@/lib/scoreBadge";
 import { ClayButton } from "./ClayButton";
 import { ClayCard } from "./ClayCard";
 
@@ -40,16 +41,6 @@ const STATUS_LABELS: Record<TrackerStatus, string> = {
   interview: "Interview",
   rejected: "Rejected",
 };
-
-function scoreClasses(score: number): string {
-  if (score >= 80) {
-    return "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400";
-  }
-  if (score >= 60) {
-    return "bg-amber-500/12 text-amber-600 dark:text-amber-400";
-  }
-  return "bg-slate-500/12 text-slate-600 dark:text-slate-400";
-}
 
 function shortDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, {
@@ -198,10 +189,10 @@ export function TrackerBoard() {
         </ClayCard>
       ) : (
         visible.map((item) => (
-          <ClayCard key={item.id} className="flex flex-col gap-3">
+          <ClayCard key={item.id} className="flex flex-col gap-2 p-4 sm:p-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h3 className="truncate text-base font-bold">{item.title}</h3>
+                <h3 className="truncate text-[15px] font-bold leading-6">{item.title}</h3>
                 <p className="truncate text-sm text-muted-foreground">
                   {item.company} · {item.location}
                 </p>
@@ -214,26 +205,7 @@ export function TrackerBoard() {
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              <span
-                className={`rounded-full px-2 py-0.5 font-bold ${STATUS_STYLES[item.status]}`}
-              >
-                {STATUS_LABELS[item.status]}
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <CalendarClock className="size-3" />
-                seen {shortDate(item.firstSeenAt)}
-              </span>
-              {item.status === "applied" && item.appliedAt !== undefined && (
-                <span>· applied {shortDate(item.appliedAt)}</span>
-              )}
-              {item.tailoredScore != null && (
-                <span>· tailored to {item.tailoredScore}%</span>
-              )}
-              {item.status === "interview" && <span>· interviewing</span>}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 pt-1">
+            <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
               <a
                 href={item.url}
                 target="_blank"
@@ -281,6 +253,19 @@ export function TrackerBoard() {
                   </ClayButton>
                 ),
               )}
+              <span
+                className={`ml-auto rounded-full px-2 py-0.5 font-bold ${STATUS_STYLES[item.status]}`}
+                title={
+                  item.status === "applied" && item.appliedAt !== undefined
+                    ? `Applied ${shortDate(item.appliedAt)} · first seen ${shortDate(item.firstSeenAt)}`
+                    : `First seen ${shortDate(item.firstSeenAt)}`
+                }
+              >
+                {STATUS_LABELS[item.status]}
+                {item.status === "applied" && item.appliedAt !== undefined
+                  ? ` · ${shortDate(item.appliedAt)}`
+                  : ""}
+              </span>
             </div>
           </ClayCard>
         ))
