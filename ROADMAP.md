@@ -621,6 +621,18 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the thirty-first pass (2026-10-10) — row polish
+
+**Requested:** "proceed".
+
+- **Tier dot on every result row** — each `JobResultCard` fit line now leads
+  with the same colored tier dot the section headers use (emerald/sky/amber
+  via `TIER_DOTS`), with the tier name in its tooltip — cards stay readable
+  when the board is filtered or scrolled away from the headers.
+- **Open-posting link tightened** — the row's "Open ↗" text link becomes a
+  quiet circular icon button (accent hover,_PRIMARY on hover), one fewer
+  competing text element per row.
+
 ## Resolved in the thirtieth pass (2026-10-10) — consistency pass on the redesign
 
 **Requested:** "proceed with updates".

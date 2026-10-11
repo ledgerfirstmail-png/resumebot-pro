@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { ExternalLink, Loader2, MapPin, Wand2 } from "lucide-react";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { scoreClasses } from "@/lib/scoreBadge";
-import { tierLevel } from "@/lib/resultTiers";
+import { tierLevel, TIER_DOTS } from "@/lib/resultTiers";
 import { ClayButton } from "./ClayButton";
 import { ClayCard } from "./ClayCard";
 
@@ -104,6 +104,16 @@ export function JobResultCard({
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold text-muted-foreground">
+        <span
+          className={`size-1.5 shrink-0 rounded-full ${TIER_DOTS[tier]}`}
+          title={
+            tier === 2
+              ? "Strong match"
+              : tier === 1
+                ? "Good match"
+                : "Worth a look"
+          }
+        />
         <span className="truncate">{statusLine(match)}</span>
         {match.matchedKeywords.length > 0 && (
           <span
@@ -123,7 +133,7 @@ export function JobResultCard({
         )}
       </div>
 
-      <div className="mt-auto flex items-center gap-2 pt-1">
+      <div className="flex items-center gap-2 pt-1">
         <ClayButton
           size="sm"
           onClick={onTailor}
@@ -174,10 +184,11 @@ export function JobResultCard({
           href={match.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="ml-auto inline-flex items-center gap-1 whitespace-nowrap text-xs font-bold text-primary hover:underline"
+          className="ml-auto inline-flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-primary"
           aria-label={`Open the ${match.title} posting at ${match.company}`}
+          title="Open the posting on the board"
         >
-          Open <ExternalLink className="size-3.5" />
+          <ExternalLink className="size-4" />
         </a>
       </div>
     </ClayCard>
