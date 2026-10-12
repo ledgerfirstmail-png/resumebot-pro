@@ -621,6 +621,36 @@ path awaits a saved resume; reset-email delivery needs a real inbox.
 
 ---
 
+## Resolved in the thirty-second pass (2026-10-11) — scan recall: +3 source families, wider fetches
+
+**Requested:** "the jobs scanner is not finding less than 1 percent of jobs.
+Enhance code to find more jobs and businesses."
+
+Every new feed was probed live (status + row shapes) before wiring; the
+three structural recall wins:
+
+- **Himalayas joins as a first-class source** — its key-free API verified
+  live (`country=US` + `q` server-side search, 20 rows/call, cursor paging,
+  real descriptions; 60k+ US-restricted rows in the index). Two cursor
+  pages per scan = up to 40 US rows with descriptions — the first new
+  source family with *searchable US volume* since the Muse.
+- **Greenhouse boards ×7 + Ashby board ×1** — public careers APIs per
+  employer (verified live: stripe 727, databricks 890, coinbase 222,
+  robinhood 181, airbnb 159, dropbox 32, flexport, perplexity 132 rows).
+  The radar now samples the big US-tech ATS carriers; tokens are a plain
+  const list (adding more is the ongoing recall lever — they're public
+  careers URLs, not credentials). New pure parsers `parseMuseJobs` and
+  `parseGreenhouseJobs` in `src/lib/boardFeeds.ts` (7 new tests).
+- **Wider fetches at every existing tap** — persisted cap 40 → **100**
+  (the table prune keeps "new" at 150, so storage stays bounded), The Muse
+  2 → **5 pages** (deepens both the worldwide and location pools), Jobicy
+  now requests `count=100&geo=usa` (US-filtered at the source), We Work
+  Remotely RSS slice 40 → 80.
+
+Dedupe guards are unchanged; greenhouse/ashby rows carry titles, real
+locations, urls, and dates (score on title + tags since their list payloads
+skip descriptions).
+
 ## Resolved in the thirty-first pass (2026-10-10) — row polish
 
 **Requested:** "proceed".

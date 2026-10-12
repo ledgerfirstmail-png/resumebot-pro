@@ -26,7 +26,11 @@ import {
   tokenize,
   type MatchProfile,
 } from "../lib/matchScore";
-import { parseWeWorkRemotelyRss } from "../lib/boardFeeds";
+import {
+  parseGreenhouseJobs,
+  parseMuseJobs,
+  parseWeWorkRemotelyRss,
+} from "../lib/boardFeeds";
 import {
   nominatimFirstPlace,
   normalizeGeoKey,
@@ -59,8 +63,27 @@ const FETCH_TIMEOUT_MS = 10_000;
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 /** Cached coordinates are trusted for a week, then re-resolved on demand. */
 const GEO_TTL_MS = 7 * 24 * 3_600_000;
-/** Postings persisted per search (the table self-prunes past 150 "new"). */
-const MAX_POSTINGS = 40;
+/** Postings persisted per search (the table self-prunes past 150 "new").
+ * Pass 32 raised this 40 → 100: with ~10 sources returning verified volume,
+ * the deeper rows are exactly where recall gains materialize after the
+ * cross-board dedupe and the strict US filter — the table prune keeps the
+ * "new" cap at 150 so storage stays bounded. */
+const MAX_POSTINGS = 100;
+
+/**
+ * Greenhouse board tokens (public careers pages, verified live). Each token
+ * is one employer's public board; adding new tokens is the recall lever.
+ * Covers US-heavy tech employers count total > 1.8k rows.
+ */
+const GREENHOUSE_BOARDS = [
+  "stripe",
+  "coinbase",
+  "robinhood",
+  "airbnb",
+  "dropbox",
+  "flexport",
+  "databricks",
+] as const;
 const MAX_DESCRIPTION_CHARS = 4_000;
 
 interface RawPosting {
@@ -186,6 +209,150 @@ async function fetchRemotive(query: string): Promise<RawPosting[]> {
   });
 }
 
+/**
+ * Himalayas — key-free remote-jobs API (verified live: country=US filter,
+ * up to 20 rows/call, keyword search, and per-row description text). Its
+ * locationRestrictions is an array ("United States"), which the pure
+ * himalayasLocation() below flattens into "United States".
+ */
+async function fetchHimalayas(query: string): Promise<RawPosting[]> {
+  const params = new URLSearchParams({ limit: "20" });
+  let cursor = "";
+  if (query.trim()) params.set("q", query.trim());
+  params.set("country", "US");
+  const pages: Array<{ jobs?: unknown[]; nextCursor?: string }> = [];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const url = `https://himalayas.app/jobs/api/search?${params.toString()}${
+      cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
+    }`;
+    const data = (await fetchJson(url)) as {
+      jobs?: unknown[];
+      nextCursor?: string;
+    };
+    pages.push(data);
+    const next = typeof data.nextCursor === "string" ? data.nextCursor : "";
+    if (!next) break;
+    cursor = next;
+  }
+  return pages.flatMap((data) => (data.jobs ?? [])).flatMap((entry) => {
+    const j = (entry ?? {}) as Record<string, unknown>;
+    const title = str(j.title);
+    const link = str(j.applicationLink) || str(j.guid);
+    if (!title || !link) return [];
+    return [
+      {
+        source: "himalayas",
+        externalId: link,
+        title,
+        company: str(j.companyName) || "Unknown company",
+        description: htmlToText(str(j.description)).slice(
+          0,
+          MAX_DESCRIPTION_CHARS,
+        ),
+        url: link,
+        location: himalayasLocation(j.locationRestrictions),
+        postedAt: parseHimalayasDate(j.pubDate),
+        tags: Array.isArray(j.categories)
+          ? j.categories.filter((t): t is string => typeof t === "string")
+          : [],
+      },
+    ];
+  });
+}
+
+/** Himalayas locationRestrictions array → one display string. */
+function himalayasLocation(raw: unknown): string {
+  if (Array.isArray(raw)) {
+    const parts = raw
+      .filter((p): p is string => typeof p === "string" && p.length > 1)
+      .slice(0, 4);
+    if (parts.length > 0) return parts.join("; ");
+  }
+  if (typeof raw === "string" && raw.length > 1) return raw;
+  return "Unknown";
+}
+
+/** Himalayas pubDate arrives as Unix seconds (or ISO) — accept both. */
+function parseHimalayasDate(raw: unknown): number | undefined {
+  if (typeof raw === "number") {
+    const ms = raw < 1e12 ? raw * 1000 : raw;
+    return Number.isFinite(ms) ? ms : undefined;
+  }
+  if (typeof raw === "string" && raw) {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return ms;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return parseHimalayasDate(n);
+  }
+  return undefined;
+}
+
+/**
+ * Greenhouse boards — public careers API per employer (verified live:
+ * stripe, coinbase, robinhood, airbnb, dropbox, flexport, databricks all
+ * return 200 with real volume). The list shape carries title/company/
+ * location/url but NO description — rows keep empty descriptions and score
+ * on title/tags, keeping the fetch cheap.
+ */
+async function fetchGreenhouse(board: string): Promise<RawPosting[]> {
+  const data = await fetchJson(
+    `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs`,
+  );
+  return parseGreenhouseJobs(data, board).map((job) => ({
+    source: "greenhouse",
+    externalId: job.externalId,
+    title: job.title,
+    company: job.company,
+    description: "",
+    url: job.url,
+    location: job.location,
+    postedAt: job.postedAt,
+    tags: job.tags,
+  }));
+}
+
+/**
+ * Ashby boards — public careers API per employer (verified live for one
+ * US employer board, perplexity: 132 rows). List shape carries
+ * title/location/jobUrl but no description.
+ */
+const ASHBY_BOARDS = ["perplexity"] as const;
+
+async function fetchAshby(board: string): Promise<RawPosting[]> {
+  const data = (await fetchJson(
+    `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(board)}`,
+  )) as { jobs?: unknown[] };
+  return (data.jobs ?? []).flatMap((entry) => {
+    const j = (entry ?? {}) as Record<string, unknown>;
+    const title = str(j.title);
+    const url = str(j.jobUrl) || str(j.applyUrl);
+    if (!title || !url) return [];
+    const loc = (j.location ?? null) as Record<string, unknown> | null;
+    const secondary = Array.isArray(j.secondaryLocations)
+      ? (j.secondaryLocations as unknown[])
+          .map((l) => str((l as Record<string, unknown> | null)?.location))
+          .filter(Boolean)
+      : [];
+    const posted = str(j.publishedAt);
+    return [
+      {
+        source: "ashby",
+        externalId: str(j.id) || url,
+        title,
+        company: board.charAt(0).toUpperCase() + board.slice(1),
+        description: "",
+        url,
+        location:
+          [str(loc?.title) || str(loc?.name) || "", ...secondary]
+            .filter(Boolean)
+            .join("; ") || "Unspecified",
+        postedAt: posted ? parseDate(posted) : undefined,
+        tags: ["ashby"],
+      },
+    ];
+  });
+}
+
 /** RemoteOK — public feed; requires a User-Agent, first row is a legal note. */
 async function fetchRemoteOk(): Promise<RawPosting[]> {
   const data = await fetchJson("https://remoteok.com/api");
@@ -229,8 +396,11 @@ async function fetchRemoteOk(): Promise<RawPosting[]> {
  * pulled so real local hits survive the cross-board dedupe.
  */
 async function fetchTheMuse(locationParam?: string): Promise<RawPosting[]> {
+  // Five pages (was 2 — pass 32): the worldwide index returns ~20/page, so
+  // unscoped scans need depth; a location query keeps a stable ~8500-row
+  // pool and the extra pages surface more of it.
   const pages = await Promise.allSettled(
-    [1, 2].map((page) =>
+    [1, 2, 3, 4, 5].map((page) =>
       fetchJson(
         `https://www.themuse.com/api/public/jobs?page=${page}${
           locationParam ? `&location=${encodeURIComponent(locationParam)}` : ""
@@ -238,55 +408,30 @@ async function fetchTheMuse(locationParam?: string): Promise<RawPosting[]> {
       ),
     ),
   );
-  const results = pages.flatMap((p) =>
-    p.status === "fulfilled"
-      ? (((p.value as { results?: unknown[] })?.results ?? []) as unknown[])
-      : [],
+    const results = pages.flatMap((p) =>
+    p.status === "fulfilled" ? (p.value ?? {}) : {},
   );
-  return results.flatMap((entry) => {
-    const j = (entry ?? {}) as Record<string, unknown>;
-    const title = str(j.name);
-    const url = str(
-      (j.refs ?? null) instanceof Object
-        ? ((j.refs as Record<string, unknown>) ?? {}).landing_page
-        : undefined,
-    );
-    const id = j.id === undefined || j.id === null ? "" : String(j.id);
-    if (!title || !url) return [];
-    const locations = Array.isArray(j.locations)
-      ? (j.locations as unknown[])
-          .map((l) => str((l as Record<string, unknown> | null)?.name))
-          .filter(Boolean)
-      : [];
-    const categories = Array.isArray(j.categories)
-      ? (j.categories as unknown[])
-          .map((c) => str((c as Record<string, unknown> | null)?.name))
-          .filter(Boolean)
-      : [];
-    const company = (j.company ?? null) as Record<string, unknown> | null;
-    return [
-      {
-        source: "muse",
-        externalId: id || url,
-        title,
-        company: str(company?.name) || "Unknown company",
-        description: htmlToText(str(j.contents)).slice(
-          0,
-          MAX_DESCRIPTION_CHARS,
-        ),
-        url,
-        location: locations.join("; ") || "Unspecified",
-        postedAt: parseDate(j.publication_date),
-        tags: categories,
-      },
-    ];
-  });
+  return results.flatMap((payload) =>
+    parseMuseJobs(payload).map((job) => ({
+      source: "muse" as const,
+      externalId: job.externalId,
+      title: job.title,
+      company: job.company,
+      description: job.description.slice(0, MAX_DESCRIPTION_CHARS),
+      url: job.url,
+      location: job.location,
+      postedAt: job.postedAt,
+      tags: job.tags,
+    })),
+  );
 }
 
 /** Jobicy — remote feed with country-level geo ("USA", "Worldwide", …). */
 async function fetchJobicy(): Promise<RawPosting[]> {
+  // count=100 + geo=usa (pass 32): the US-filtered slice comes straight from
+  // the source, so no worldwide rows are fetched just to be dropped.
   const data = (await fetchJson(
-    "https://jobicy.com/api/v2/remote-jobs?count=40",
+    "https://jobicy.com/api/v2/remote-jobs?count=100&geo=usa",
   )) as { jobs?: unknown[]; success?: boolean };
   if (data.success === false) return [];
   return (data.jobs ?? []).flatMap((entry) => {
@@ -398,7 +543,7 @@ async function fetchWeWorkRemotely(): Promise<RawPosting[]> {
   const { text } = await fetchText(
     "https://weworkremotely.com/remote-jobs.rss",
   );
-  return parseWeWorkRemotelyRss(text).slice(0, 40).map((job) => ({
+  return parseWeWorkRemotelyRss(text).slice(0, 80).map((job) => ({
     source: "weworkremotely",
     externalId: job.externalId,
     title: job.title,
@@ -659,6 +804,17 @@ async function gatherPostings(
     // ("Columbus, OH") narrows its search to that pool; hashtags like
     // "Flexible / Remote" still appear and are handled by the client filter.
     { name: "muse", run: () => fetchTheMuse(museLocationParam) },
+    // Himalayas: 60k+ US-restricted rows, server-side q + country=US.
+    { name: "himalayas", run: () => fetchHimalayas(query) },
+    // Greenhouse per-employer public boards — US-heavy tech volume.
+    ...GREENHOUSE_BOARDS.map((board) => ({
+      name: `gh-${board}`,
+      run: () => fetchGreenhouse(board),
+    })),
+    ...ASHBY_BOARDS.map((board) => ({
+      name: `ashby-${board}`,
+      run: () => fetchAshby(board),
+    })),
     { name: "jobicy", run: () => fetchJobicy() },
     { name: "weworkremotely", run: () => fetchWeWorkRemotely() },
     ...workdayEmployers.map((emp) => ({

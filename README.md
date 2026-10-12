@@ -139,7 +139,11 @@ tailoring exists. The scan form collapses to a single search line plus a
 Filters popover (locations + radius, employer chips, match threshold), and
 search-alert watches live behind a **Watch** button in the results toolbar.
 
-The radar scans 15 key-free feeds and keeps **USA listings only**
+The radar scans ~25 key-free feeds (remote boards — Remotive, RemoteOK,
+Himalayas, Jobicy (US-filtered at the source), We Work Remotely; public ATS
+boards — 7 Greenhouse employers + 1 Ashby; The Muse (5 pages, location-
+scoped when a place is searched) plus the local retail feeds) and keeps
+**USA listings only**
 (`isUsFocusedPosting` in `src/lib/matchScore.ts` is strict): postings from
 US-only sources (Taco Bell, WinCo, the Workday US career sites including
 Meijer) pass as-is; every other row must carry US evidence in its location —
